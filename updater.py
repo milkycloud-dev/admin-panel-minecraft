@@ -7,7 +7,7 @@ import threading
 from tkinter import messagebox
 import customtkinter as ctk
 
-CURRENT_VERSION = "1.3.2"
+CURRENT_VERSION = "1.3.3"
 REPO_API = "https://api.github.com/repos/milkycloud-dev/admin-panel-minecraft/releases/latest"
 
 def check_for_updates(app_window):
@@ -38,10 +38,14 @@ def check_for_updates(app_window):
             # [RU] Если новая версия больше текущей / [EN] If new version is greater than current
             if parse_ver(latest_version) > parse_ver(CURRENT_VERSION):
                 assets = data.get("assets", [])
-                exe_asset = next((a for a in assets if a["name"].endswith(".exe")), None)
-                if exe_asset:
+                if sys.platform == "win32":
+                    target_asset = next((a for a in assets if a["name"].endswith(".exe")), None)
+                else:
+                    target_asset = next((a for a in assets if "Linux" in a["name"]), None)
+                    
+                if target_asset:
                     # [RU] Вызываем окно обновления в главном потоке GUI / [EN] Call update prompt in main GUI thread
-                    app_window.after(0, lambda: prompt_update(app_window, latest_version, exe_asset["browser_download_url"]))
+                    app_window.after(0, lambda: prompt_update(app_window, latest_version, target_asset["browser_download_url"]))
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 print("Update check failed: Repository not found or private (404).")
@@ -100,21 +104,32 @@ def download_and_apply_update(app_window, url):
                         if total_size > 0:
                             overlay.after(0, progress.set, downloaded / total_size)
             
-            # [RU] Создаем bat-скрипт для обновления / [EN] Create batch script for update
-            # Apply update via batch script
-            bat_path = os.path.join(os.path.dirname(exe_path), "update.bat")
-            with open(bat_path, "w") as f:
-                f.write(f'''@echo off
+            # [RU] Создаем скрипт для обновления в зависимости от ОС / [EN] Create update script based on OS
+            if sys.platform == "win32":
+                bat_path = os.path.join(os.path.dirname(exe_path), "update.bat")
+                with open(bat_path, "w") as f:
+                    f.write(f'''@echo off
 timeout /t 2 /nobreak > nul
 del "{exe_path}"
 move "{new_exe_path}" "{exe_path}"
 start "" "{exe_path}"
 del "%~f0"
 ''')
+                subprocess.Popen([bat_path], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                sh_path = os.path.join(os.path.dirname(exe_path), "update.sh")
+                with open(sh_path, "w") as f:
+                    f.write(f'''#!/bin/bash
+sleep 2
+rm "{exe_path}"
+mv "{new_exe_path}" "{exe_path}"
+chmod +x "{exe_path}"
+"{exe_path}" &
+rm "$0"
+''')
+                os.chmod(sh_path, 0o755)
+                subprocess.Popen([sh_path], shell=True, start_new_session=True)
             
-            # [RU] Запускаем скрипт и закрываем программу / [EN] Run script and close program
-            # Run batch script and exit
-            subprocess.Popen([bat_path], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
             overlay.after(0, app_window.destroy)
         except Exception as e:
             # [RU] Обработка ошибок загрузки / [EN] Handle download errors

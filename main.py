@@ -1,5 +1,5 @@
 """
-Minecraft Admin Panel v1.3.2
+Minecraft Admin Panel v1.3.3
 Standalone App with Auto-updater, Custom Fonts, Backups and White-Labeling.
 """
 import os
