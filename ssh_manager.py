@@ -14,10 +14,18 @@ class SSHManager:
         try:
             self.ssh = paramiko.SSHClient()
             self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            self.ssh.connect(self.host, username=self.user, password=self.password, timeout=self.timeout)
+            self.ssh.connect(
+                self.host, 
+                username=self.user, 
+                password=self.password, 
+                timeout=self.timeout,
+                look_for_keys=False,
+                allow_agent=False
+            )
             self.sftp = self.ssh.open_sftp()
             return True, "Connected successfully"
         except Exception as e:
+            self.disconnect()
             return False, str(e)
 
     def disconnect(self):

@@ -93,8 +93,16 @@ class AdminPanel(ctk.CTk):
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=0)
 
         self._build_sidebar()
+        
+        self.log_frame = ctk.CTkFrame(self, fg_color=C["section"], height=120, corner_radius=0)
+        self.log_frame.grid(row=1, column=1, sticky="ews")
+        self.log_frame.pack_propagate(False)
+        self.live_log = ctk.CTkTextbox(self.log_frame, font=self.MONO_S, fg_color="transparent", text_color=C["text_dim"])
+        self.live_log.pack(fill="both", expand=True, padx=10, pady=10)
+
         self._pages = {}
         self._build_sync_hub()
         self._build_game_console()
@@ -106,6 +114,19 @@ class AdminPanel(ctk.CTk):
         
         # Check for updates in background
         check_for_updates(self)
+
+    def log_message(self, msg, is_error=False):
+        import datetime
+        t = datetime.datetime.now().strftime("%H:%M:%S")
+        prefix = "[ОШИБКА] " if is_error else "[СИСТЕМА] "
+        line = f"[{t}] {prefix}{msg}\n"
+        def _append():
+            self.live_log.insert("end", line)
+            if is_error:
+                # Покрасим строку в красный
+                pass
+            self.live_log.see("end")
+        self.after(0, _append)
 
     def _setup_bindings(self):
         # Поддержка копирования/вставки на английской раскладке
@@ -165,7 +186,7 @@ class AdminPanel(ctk.CTk):
     # ═══════════════════════════════════════════════════════════
     def _build_sidebar(self):
         sb = ctk.CTkFrame(self, width=240, fg_color=C["bg2"], corner_radius=0)
-        sb.grid(row=0, column=0, sticky="ns")
+        sb.grid(row=0, column=0, rowspan=2, sticky="ns")
         sb.grid_propagate(False)
 
         ctk.CTkLabel(sb, text="Minecraft", font=self.FONT_XL, text_color=C["text"]).pack(pady=(30, 2), anchor="w", padx=20)
@@ -184,7 +205,7 @@ class AdminPanel(ctk.CTk):
                                 font=self.FONT_B, fg_color="transparent", hover_color=C["section"],
                                 text_color=C["text_dim"],
                                 command=lambda k=key: self._show_page(k))
-            btn.pack(fill="x", padx=10, pady=4)
+            btn.pack(fill="x", padx=15, pady=4)
             self._sb_btns[key] = btn
 
     def _show_page(self, key):
@@ -386,20 +407,21 @@ class AdminPanel(ctk.CTk):
 
     def scan_mods(self):
         def task():
+            self.log_message("Сканирование модов на серверах...")
             for t in (self.tree_client, self.tree_game, self.tree_local):
                 for i in t.get_children(): t.delete(i)
             cm, c_err = self.sync_manager.get_remote_mods("client_server")
             gm, g_err = self.sync_manager.get_remote_mods("game_server")
             
             if c_err and "Authentication failed" in c_err:
-                self.after(0, lambda: messagebox.showerror("Ошибка входа (Клиент)", "Неверный логин или пароль для Клиент-сервера."))
+                self.log_message("Неверный логин или пароль для Клиент-сервера.", True)
             elif c_err:
-                self.after(0, lambda: messagebox.showerror("Ошибка Клиент", str(c_err)))
+                self.log_message(f"Ошибка Клиент: {c_err}", True)
                 
             if g_err and "Authentication failed" in g_err:
-                self.after(0, lambda: messagebox.showerror("Ошибка входа (Игровой)", "Неверный логин или пароль для Игрового сервера."))
+                self.log_message("Неверный логин или пароль для Игрового сервера.", True)
             elif g_err:
-                self.after(0, lambda: messagebox.showerror("Ошибка Игровой", str(g_err)))
+                self.log_message(f"Ошибка Игровой: {g_err}", True)
 
             cm = cm or {}; gm = gm or {}
             self.client_mods_cache = cm; self.game_mods_cache = gm
@@ -445,64 +467,72 @@ class AdminPanel(ctk.CTk):
 
     def _transfer(self, src, dst, fn):
         if not messagebox.askyesno("Переброс", f"Перебросить {fn}?"): return
+        self.log_message(f"Переброс {fn} с {src} на {dst}...")
         def t():
             c1, c2 = self.config_manager.get(src), self.config_manager.get(dst)
             s1, s2 = SSHManager(c1["host"],c1["user"],c1["password"]), SSHManager(c2["host"],c2["user"],c2["password"])
             ok1, m1 = s1.connect()
-            if not ok1: self.after(0, lambda: messagebox.showerror("Ошибка", f"Сервер {src}:\n{m1}")); return
+            if not ok1: self.log_message(f"Сервер {src}:\n{m1}", True); return
             ok2, m2 = s2.connect()
-            if not ok2: self.after(0, lambda: messagebox.showerror("Ошибка", f"Сервер {dst}:\n{m2}")); return
+            if not ok2: self.log_message(f"Сервер {dst}:\n{m2}", True); return
             _, ld = self.sync_manager.get_local_mods()
             tmp = os.path.join(ld, os.path.basename(fn))
             try: s1.sftp.get(f"{c1['remote_dir']}/mods/{fn}", tmp); s2.upload_file(tmp, f"{c2['remote_dir']}/mods/{fn}")
-            except Exception as e: self.after(0, lambda: messagebox.showerror("Ошибка", str(e)))
-            finally: s1.disconnect(); s2.disconnect(); self.scan_mods()
+            except Exception as e: self.log_message(f"Ошибка переброса: {str(e)}", True)
+            finally: s1.disconnect(); s2.disconnect(); self.scan_mods(); self.log_message(f"Успешно переброшен {fn}")
         threading.Thread(target=t, daemon=True).start()
 
     def _delete(self, srv, fn):
         if not messagebox.askyesno("Удаление", f"Удалить {fn}?"): return
+        self.log_message(f"Удаление {fn} с сервера {srv}...")
         def t():
             c = self.config_manager.get(srv); ssh = SSHManager(c["host"],c["user"],c["password"])
             ok, msg = ssh.connect()
-            if not ok: self.after(0, lambda: messagebox.showerror("Ошибка", msg)); return
+            if not ok: self.log_message(f"Ошибка: {msg}", True); return
             ssh.execute_command(f"rm -f \"{c['remote_dir']}/mods/{fn}\"")
             ssh.disconnect()
+            self.log_message(f"Удалено {fn}")
             self.scan_mods()
         threading.Thread(target=t, daemon=True).start()
 
     def _dl_local(self, srv, fn):
+        self.log_message(f"Скачивание {fn} локально...")
         def t():
             c = self.config_manager.get(srv); ssh = SSHManager(c["host"],c["user"],c["password"])
             ok, msg = ssh.connect()
-            if not ok: self.after(0, lambda: messagebox.showerror("Ошибка", msg)); return
+            if not ok: self.log_message(f"Ошибка: {msg}", True); return
             d = self.local_path_var.get(); os.makedirs(d, exist_ok=True)
             try: ssh.sftp.get(f"{c['remote_dir']}/mods/{fn}", os.path.join(d, os.path.basename(fn)))
-            except Exception as e: self.after(0, lambda: messagebox.showerror("Ошибка", str(e)))
-            finally: ssh.disconnect(); self._refresh_local()
+            except Exception as e: self.log_message(f"Ошибка: {str(e)}", True)
+            finally: ssh.disconnect(); self._refresh_local(); self.log_message(f"Скачано {fn}")
         threading.Thread(target=t, daemon=True).start()
 
     def upload_local_mod(self, target_server):
         files = filedialog.askopenfilenames(title="Моды (.jar)", filetypes=[("JAR", "*.jar")])
         if not files: return
+        self.log_message(f"Загрузка {len(files)} модов на {target_server}...")
         def t():
             c = self.config_manager.get(target_server)
             s = SSHManager(c["host"],c["user"],c["password"])
             ok, msg = s.connect()
-            if not ok: self.after(0, lambda: messagebox.showerror("Ошибка", msg)); return
+            if not ok: self.log_message(f"Ошибка: {msg}", True); return
             for f in files:
                 s.upload_file(f, f"{c['remote_dir']}/mods/{os.path.basename(f)}")
             s.disconnect()
+            self.log_message(f"Загружено {len(files)} модов на {target_server}.")
             self.scan_mods()
         threading.Thread(target=t, daemon=True).start()
 
     def _up1(self, ap, srv):
         if not messagebox.askyesno("Загрузка", f"Загрузить {os.path.basename(ap)}?"): return
+        self.log_message(f"Загрузка {os.path.basename(ap)} на {srv}...")
         def t():
             c = self.config_manager.get(srv); ssh = SSHManager(c["host"],c["user"],c["password"])
             ok, msg = ssh.connect()
-            if not ok: self.after(0, lambda: messagebox.showerror("Ошибка", msg)); return
+            if not ok: self.log_message(f"Ошибка: {msg}", True); return
             ssh.upload_file(ap, f"{c['remote_dir']}/mods/{os.path.basename(ap)}")
             ssh.disconnect()
+            self.log_message(f"Загружено {os.path.basename(ap)}")
             self.scan_mods()
         threading.Thread(target=t, daemon=True).start()
 
@@ -510,21 +540,23 @@ class AdminPanel(ctk.CTk):
         d = self.local_path_var.get()
         jars = [f for f in os.listdir(d) if f.endswith(".jar") and not f.startswith(".")]
         if not jars or not messagebox.askyesno("Загрузка", f"Загрузить {len(jars)} модов?"): return
+        self.log_message(f"Загрузка локальной папки на {srv}...")
         def t():
             c = self.config_manager.get(srv); ssh = SSHManager(c["host"],c["user"],c["password"])
             ok, msg = ssh.connect()
-            if not ok: self.after(0, lambda: messagebox.showerror("Ошибка", msg)); return
+            if not ok: self.log_message(f"Ошибка: {msg}", True); return
             for j in jars: ssh.upload_file(os.path.join(d,j), f"{c['remote_dir']}/mods/{j}")
-            ssh.disconnect(); self.scan_mods()
+            ssh.disconnect(); self.log_message("Массовая загрузка завершена."); self.scan_mods()
         threading.Thread(target=t, daemon=True).start()
 
     def update_manifest_only(self):
         if not messagebox.askyesno("Manifest", "Пересобрать manifest.json на сервере скачивания?"): return
+        self.log_message("Запущена пересборка manifest.json...")
         def t():
             dc = self.config_manager.get("client_server"); db = dc["remote_dir"]
             ssh = SSHManager(dc["host"],dc["user"],dc["password"])
             ok, msg = ssh.connect()
-            if not ok: self.after(0, lambda: messagebox.showerror("Ошибка", msg)); return
+            if not ok: self.log_message(f"Ошибка: {msg}", True); return
             script = f"""import os,json,blake3
 d='{db}/mods';mp='{db}/manifest.json'
 with open(mp,'r') as f: m=json.load(f)
@@ -542,7 +574,8 @@ print("OK")
 """
             b = base64.b64encode(script.encode()).decode()
             ssh.execute_command(f'python3 -c "import base64,sys;exec(base64.b64decode(sys.argv[1]).decode(\'utf-8\'))" {b}')
-            ssh.disconnect(); messagebox.showinfo("Manifest", "Manifest пересобран.")
+            ssh.disconnect()
+            self.log_message("Manifest успешно пересобран!")
         threading.Thread(target=t, daemon=True).start()
 
 
@@ -744,7 +777,7 @@ print("OK")
             gc = self.config_manager.get("game_server")
             ssh = SSHManager(gc["host"], gc["user"], gc["password"])
             ok, msg = ssh.connect()
-            if not ok: self.after(0, lambda: messagebox.showerror("Ошибка", f"Бекапы недоступны:\n{msg}")); return
+            if not ok: self.log_message(f"Бекапы недоступны:\n{msg}", True); return
             b_dir = f"{gc['remote_dir']}/backups"
             ssh.execute_command(f"mkdir -p {b_dir}")
             ok, out = ssh.execute_command(f"ls -lh --time-style=long-iso {b_dir}")
@@ -764,20 +797,14 @@ print("OK")
     def _create_backup(self):
         if not messagebox.askyesno("Бекап", "Запустить создание резервной копии сервера? Это может занять время и снизить производительность (TPS)."): return
         
-        overlay = ctk.CTkToplevel(self)
-        overlay.title("Создание бекапа")
-        overlay.geometry("400x120")
-        overlay.attributes("-topmost", True)
-        overlay.resizable(False, False)
-        ctk.CTkLabel(overlay, text="Создание архива 7z на сервере...\nПожалуйста, подождите.", font=self.FONT_B).pack(pady=30)
+        self.log_message("Запущено создание резервной копии сервера. Ждем завершения...")
         
         def t():
             gc = self.config_manager.get("game_server")
             ssh = SSHManager(gc["host"], gc["user"], gc["password"], timeout=300) # Long timeout for 7z
             ok, msg = ssh.connect()
             if not ok:
-                overlay.after(0, overlay.destroy)
-                self.after(0, lambda: messagebox.showerror("Ошибка", msg))
+                self.log_message(f"Ошибка бекапа: {msg}", True)
                 return
                 
             import datetime
@@ -791,12 +818,12 @@ print("OK")
             excl_cmd = " ".join([f"-x!{f.strip()}" for f in excl.split(",") if f.strip()])
             cmd = f"cd {gc['remote_dir']} && 7z a {args} {b_dir}/{b_name} ./* {excl_cmd}"
             
+            self.log_message(f"Сжатие файлов в {b_name}...")
             ssh.execute_command(cmd)
             ssh.disconnect()
             
-            overlay.after(0, overlay.destroy)
             self.after(0, self.refresh_backups)
-            self.after(0, lambda: messagebox.showinfo("Бекап", "Резервное копирование завершено!"))
+            self.log_message(f"Резервное копирование завершено ({b_name})!")
             
         threading.Thread(target=t, daemon=True).start()
 
@@ -830,7 +857,44 @@ print("OK")
         self._sv[("paths","local_mods_dir")] = v
         ctk.CTkEntry(r, textvariable=v, fg_color=C["bg"], border_width=0, font=self.FONT, height=36, corner_radius=8, text_color=C["text"]).pack(side="left", fill="x", expand=True)
 
-        ctk.CTkButton(scroll, text="Сохранить", height=40, width=150, corner_radius=20, font=self.FONT_B, fg_color=C["accent"], hover_color=C["accent_h"], command=self._save_settings).pack(pady=(20, 20))
+        btns = ctk.CTkFrame(scroll, fg_color="transparent")
+        btns.pack(pady=(20, 20))
+        ctk.CTkButton(btns, text="Сохранить", height=40, width=150, corner_radius=20, font=self.FONT_B, fg_color=C["accent"], hover_color=C["accent_h"], command=self._save_settings).pack(side="left", padx=10)
+        self.btn_reset = ctk.CTkButton(btns, text="Сбросить настройки", height=40, width=150, corner_radius=20, font=self.FONT_B, fg_color=C["red"], hover_color=C["red_h"], command=self._start_reset_timer)
+        self.btn_reset.pack(side="left", padx=10)
+        self._reset_timer = None
+        self._reset_count = 0
+
+    def _start_reset_timer(self):
+        if self._reset_timer:
+            self.after_cancel(self._reset_timer)
+            self._reset_timer = None
+            self.btn_reset.configure(text="Сбросить настройки", fg_color=C["red"], hover_color=C["red_h"])
+            return
+            
+        self._reset_count = 10
+        self.btn_reset.configure(fg_color=C["orange"], hover_color="#FF7B1A")
+        self._tick_reset()
+        
+    def _tick_reset(self):
+        if self._reset_count <= 0:
+            self._do_reset()
+            return
+            
+        self.btn_reset.configure(text=f"Отменить сброс ({self._reset_count})")
+        self._reset_count -= 1
+        self._reset_timer = self.after(1000, self._tick_reset)
+        
+    def _do_reset(self):
+        self._reset_timer = None
+        self.btn_reset.configure(text="Сбросить настройки", fg_color=C["red"], hover_color=C["red_h"])
+        import shutil
+        cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin_settings.json")
+        if os.path.exists(cfg): os.remove(cfg)
+        self.config_manager = ConfigManager()
+        self.log_message("Настройки полностью сброшены!")
+        self.after(0, lambda: messagebox.showinfo("Сброс", "Настройки сброшены! Программа закроется."))
+        self.after(500, self.destroy)
 
     def _scard(self, parent, title, section, fields):
         card = ctk.CTkFrame(parent, fg_color=C["section"], corner_radius=12)
@@ -847,7 +911,11 @@ print("OK")
 
     def _save_settings(self):
         for (s, k), v in self._sv.items(): self.config_manager.set(s, k, v.get())
-        messagebox.showinfo("Готово", "Все настройки успешно сохранены. Перезапустите вкладки для применения.")
+        self.log_message("Настройки успешно сохранены и применены.")
+        if getattr(self, "_stream_running", False):
+            self._stream_running = False
+            self.after(500, self._start_live_stream)
+        self.scan_mods()
 
 if __name__ == "__main__":
     app = AdminPanel()
