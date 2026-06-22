@@ -1,5 +1,5 @@
 """
-Minecraft Admin Panel v1.1
+Minecraft Admin Panel v1.3.2
 Standalone App with Auto-updater, Custom Fonts, Backups and White-Labeling.
 """
 import os
@@ -293,7 +293,7 @@ class AdminPanel(ctk.CTk):
 
         style = ttk.Style()
         style.theme_use("default")
-        style.configure("NB.Treeview", background=C["section"], foreground=C["text"], fieldbackground=C["section"], borderwidth=0, font=self.FONT, rowheight=26)
+        style.configure("NB.Treeview", background=C["section"], foreground=C["text"], fieldbackground=C["section"], borderwidth=0, font=self.FONT_S, rowheight=26)
         style.configure("NB.Treeview.Heading", background=C["section"], foreground=C["text_dim"], font=self.FONT_B, borderwidth=0, relief="flat", padding=(0, 5))
         style.map("NB.Treeview", background=[("selected", C["accent"])])
 
