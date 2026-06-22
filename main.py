@@ -1,5 +1,5 @@
 """
-Minecraft Admin Panel v1.3.8
+Minecraft Admin Panel v1.3.9
 Standalone App with Auto-updater, Custom Fonts, Backups and White-Labeling.
 """
 import os
@@ -497,18 +497,30 @@ class AdminPanel(ctk.CTk):
             """
             for t in (self.tree_client, self.tree_game, self.tree_local):
                 for i in t.get_children(): t.delete(i)
-            cm, c_err = self.sync_manager.get_remote_mods("client_server")
-            gm, g_err = self.sync_manager.get_remote_mods("game_server")
+            import time
+            cm, c_err = None, None
+            while True:
+                cm, c_err = self.sync_manager.get_remote_mods("client_server")
+                if c_err and "Authentication failed" in c_err:
+                    self.log_message("Неверный логин или пароль для Клиент-сервера.", True)
+                    break
+                elif c_err:
+                    self.log_message(f"Ошибка Клиент: {c_err}. Переподключение через 3с...", True)
+                    time.sleep(3)
+                else:
+                    break
             
-            if c_err and "Authentication failed" in c_err:
-                self.log_message("Неверный логин или пароль для Клиент-сервера.", True)
-            elif c_err:
-                self.log_message(f"Ошибка Клиент: {c_err}", True)
-                
-            if g_err and "Authentication failed" in g_err:
-                self.log_message("Неверный логин или пароль для Игрового сервера.", True)
-            elif g_err:
-                self.log_message(f"Ошибка Игровой: {g_err}", True)
+            gm, g_err = None, None
+            while True:
+                gm, g_err = self.sync_manager.get_remote_mods("game_server")
+                if g_err and "Authentication failed" in g_err:
+                    self.log_message("Неверный логин или пароль для Игрового сервера.", True)
+                    break
+                elif g_err:
+                    self.log_message(f"Ошибка Игровой: {g_err}. Переподключение через 3с...", True)
+                    time.sleep(3)
+                else:
+                    break
 
             cm = cm or {}; gm = gm or {}
             self.client_mods_cache = cm; self.game_mods_cache = gm
