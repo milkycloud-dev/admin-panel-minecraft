@@ -42,7 +42,8 @@ class ConfigManager:
             if answer is True: # [RU] Пользователь выбрал импорт / [EN] User chose to import
                 file_path = filedialog.askopenfilename(title="Выберите файл настроек (json)", filetypes=[("JSON", "*.json")])
                 if file_path:
-                    shutil.copy(file_path, self.config_path)
+                    if os.path.abspath(file_path) != os.path.abspath(self.config_path):
+                        shutil.copy(file_path, self.config_path)
                 else:
                     self._create_empty()
             elif answer is False: # [RU] Пользователь выбрал создание пустого файла / [EN] User chose to create empty file
