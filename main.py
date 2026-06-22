@@ -1,5 +1,5 @@
 """
-Minecraft Admin Panel v1.3.5
+Minecraft Admin Panel v1.3.6
 Standalone App with Auto-updater, Custom Fonts, Backups and White-Labeling.
 """
 import os
@@ -1066,6 +1066,18 @@ print("OK")
             ok, msg = ssh.connect()
             if not ok:
                 self.log_message(f"Ошибка бекапа: {msg}", True)
+                return
+                
+            ok_7z, out_7z = ssh.execute_command("which 7z")
+            if not ok_7z or not out_7z.strip():
+                self.log_message("Ошибка: 7z не установлен на сервере. Установите: apt install p7zip-full", True)
+                ssh.disconnect()
+                return
+                
+            ok_scr, out_scr = ssh.execute_command("which screen")
+            if not ok_scr or not out_scr.strip():
+                self.log_message("Ошибка: screen не установлен на сервере. Установите: apt install screen", True)
+                ssh.disconnect()
                 return
                 
             import datetime
