@@ -1,5 +1,5 @@
 """
-Minecraft Admin Panel v1.3.7
+Minecraft Admin Panel v1.3.8
 Standalone App with Auto-updater, Custom Fonts, Backups and White-Labeling.
 """
 import os
@@ -989,8 +989,13 @@ print("OK")
         ref_btn.pack(side="right", padx=10)
         
         self.backup_prog_frame = ctk.CTkFrame(page, fg_color="transparent")
-        self.backup_lbl = ctk.CTkLabel(self.backup_prog_frame, text="Прогресс: 0% | Оценка времени: --:--", font=self.FONT_B, text_color=C["text"])
-        self.backup_lbl.pack(anchor="w", padx=20, pady=(5, 0))
+        top_prog_frame = ctk.CTkFrame(self.backup_prog_frame, fg_color="transparent")
+        top_prog_frame.pack(fill="x", padx=20, pady=(5, 0))
+        self.backup_lbl = ctk.CTkLabel(top_prog_frame, text="Прогресс: 0% | Оценка времени: --:--", font=self.FONT_B, text_color=C["text"])
+        self.backup_lbl.pack(side="left")
+        self.cancel_backup_btn = ctk.CTkButton(top_prog_frame, text="Отменить", width=80, height=24, corner_radius=12,
+                                               font=self.FONT, fg_color=C["row_red"], hover_color="#C0392B", text_color="#FFFFFF", command=self._cancel_backup)
+        self.cancel_backup_btn.pack(side="right")
         self.backup_pb = ctk.CTkProgressBar(self.backup_prog_frame, progress_color=C["accent"], height=10)
         self.backup_pb.set(0)
         self.backup_pb.pack(fill="x", padx=20, pady=5)
@@ -1045,6 +1050,28 @@ print("OK")
                             self.tree_backups.insert("", "end", values=(name, size, date))
             ssh.disconnect()
             self.log_message("[Система] Список бекапов успешно получен.")
+        threading.Thread(target=t, daemon=True).start()
+
+    def _cancel_backup(self):
+        """
+        [RU] Функция _cancel_backup.
+        [EN] Function _cancel_backup.
+        """
+        if not messagebox.askyesno("Отмена бекапа", "Вы уверены, что хотите отменить текущий бекап?"): return
+        
+        def t():
+            self.log_message("[Система] Отмена бекапа на сервере...")
+            gc = self.config_manager.get("game_server")
+            ssh = SSHManager(gc["host"], gc["user"], gc["password"], timeout=30)
+            ok, msg = ssh.connect()
+            if ok:
+                ssh.execute_command("screen -X -S admin_backup quit")
+                ssh.execute_command("killall 7z")
+                ssh.disconnect()
+            self._backup_monitoring = False
+            self.after(0, lambda: self.backup_prog_frame.pack_forget())
+            self.log_message("[Система] Бекап успешно отменен.", True)
+        
         threading.Thread(target=t, daemon=True).start()
 
     def _create_backup(self):
