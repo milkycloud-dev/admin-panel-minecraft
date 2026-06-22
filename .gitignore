@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.json
+!news.json
+!manifest.json
+mods/
+build/
+dist/
+*.spec
+.env
