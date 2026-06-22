@@ -7,7 +7,7 @@ import threading
 from tkinter import messagebox
 import customtkinter as ctk
 
-CURRENT_VERSION = "1.0.0"
+CURRENT_VERSION = "1.2.2"
 REPO_API = "https://api.github.com/repos/milkycloud-dev/admin-panel-minecraft/releases/latest"
 
 def check_for_updates(app_window):
@@ -20,7 +20,10 @@ def check_for_updates(app_window):
             latest_version = data.get("tag_name", "").lstrip("v")
             if not latest_version: return
             
-            if latest_version != CURRENT_VERSION:
+            def parse_ver(v):
+                return [int(x) for x in v.split('.') if x.isdigit()]
+            
+            if parse_ver(latest_version) > parse_ver(CURRENT_VERSION):
                 assets = data.get("assets", [])
                 exe_asset = next((a for a in assets if a["name"].endswith(".exe")), None)
                 if exe_asset:
