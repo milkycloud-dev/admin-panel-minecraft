@@ -65,7 +65,7 @@ class SyncManager:
         
         import base64
         # [RU] Скрипт, который будет выполнен на сервере / [EN] Script to be executed on the server
-        script = f"""import os
+        script = f"""import os, hashlib
 d = '{remote_mods_dir}'
 if not os.path.exists(d):
     try: os.makedirs(d)
@@ -75,7 +75,14 @@ if os.path.exists(d):
         for f in files:
             if f.endswith('.jar') and not f.startswith('.'):
                 p = os.path.join(r, f)
-                print(os.path.relpath(p, d).replace('\\\\', '/') + '|' + str(os.path.getsize(p)))
+                try:
+                    sz = os.path.getsize(p)
+                    h = hashlib.md5()
+                    with open(p, 'rb') as x:
+                        while c := x.read(8192): h.update(c)
+                    print(os.path.relpath(p, d).replace('\\\\', '/') + '|' + str(sz) + '|' + h.hexdigest())
+                except Exception:
+                    pass
 """
         # [RU] Кодируем скрипт в base64 для безопасной передачи / [EN] Encode script to base64 for safe transfer
         b64 = base64.b64encode(script.encode('utf-8')).decode('utf-8')
@@ -89,11 +96,12 @@ if os.path.exists(d):
             # [RU] Парсим вывод скрипта / [EN] Parse script output
             for line in out.strip().split('\n'):
                 parts = line.strip().split('|')
-                if len(parts) == 2:
+                if len(parts) >= 2:
                     rel_path = parts[0]
                     try:
                         size = int(parts[1])
-                        mods[rel_path] = {"size": size}
+                        checksum = parts[2] if len(parts) > 2 else ""
+                        mods[rel_path] = {"size": size, "hash": checksum}
                     except ValueError:
                         pass
 

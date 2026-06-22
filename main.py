@@ -1,5 +1,5 @@
 """
-Minecraft Admin Panel v1.3.3
+Minecraft Admin Panel v1.3.4
 Standalone App with Auto-updater, Custom Fonts, Backups and White-Labeling.
 """
 import os
@@ -52,6 +52,7 @@ C = {
     "row_green": "#163319",
     "row_yellow":"#3D3512",
     "row_blue":  "#142940",
+    "row_red":   "#4D1B1B"
 }
 
 ctk.set_appearance_mode("Dark")
@@ -336,7 +337,7 @@ class AdminPanel(ctk.CTk):
             tree.column("size", width=80, minwidth=60, anchor="e")
             tree.column("status", width=120, minwidth=80, anchor="center")
             
-            for tag in ("green", "yellow", "blue"):
+            for tag in ("green", "yellow", "blue", "red"):
                 tree.tag_configure(tag, background=C[f"row_{tag}"])
             
             tree.pack(side="left", fill="both", expand=True)
@@ -513,8 +514,13 @@ class AdminPanel(ctk.CTk):
             gb = {}; [gb.setdefault(self._mod_base(f), []).append(f) for f in gm]
             matched, partial, c_only, g_only = [], [], [], []; pc, pg = set(), set()
             for f in sorted(set(cm) & set(gm), key=str.lower):
-                if cm[f]["size"] == gm[f]["size"]: matched.append((f, f, cm[f]["size"], gm[f]["size"]))
-                else: partial.append((f, f, cm[f]["size"], gm[f]["size"]))
+                if cm[f]["size"] == gm[f]["size"]:
+                    hash_match = True
+                    if cm[f].get("hash") and gm[f].get("hash") and cm[f]["hash"] != gm[f]["hash"]:
+                        hash_match = False
+                    matched.append((f, f, cm[f]["size"], gm[f]["size"], hash_match))
+                else: 
+                    partial.append((f, f, cm[f]["size"], gm[f]["size"]))
                 pc.add(f); pg.add(f)
             for b, cfs in sorted(cb.items()):
                 if b in gb:
@@ -527,9 +533,13 @@ class AdminPanel(ctk.CTk):
             [c_only.append(f) for f in sorted(set(cm) - pc, key=str.lower)]
             [g_only.append(f) for f in sorted(set(gm) - pg, key=str.lower)]
 
-            for cf, gf, cs, gs in sorted(matched, key=lambda x: x[0].lower()):
-                self.tree_client.insert("", "end", values=(cf, self._fmt(cs), "совпадает"), tags=("green",))
-                self.tree_game.insert("", "end", values=(gf, self._fmt(gs), "совпадает"), tags=("green",))
+            for cf, gf, cs, gs, hash_match in sorted(matched, key=lambda x: x[0].lower()):
+                if hash_match:
+                    self.tree_client.insert("", "end", values=(cf, self._fmt(cs), "✔ совпадает"), tags=("green",))
+                    self.tree_game.insert("", "end", values=(gf, self._fmt(gs), "✔ совпадает"), tags=("green",))
+                else:
+                    self.tree_client.insert("", "end", values=(cf, self._fmt(cs), "❌ суммы разные"), tags=("red",))
+                    self.tree_game.insert("", "end", values=(gf, self._fmt(gs), "❌ суммы разные"), tags=("red",))
             for cf, gf, cs, gs in sorted(partial, key=lambda x: x[0].lower()):
                 self.tree_client.insert("", "end", values=(cf, self._fmt(cs), "разные версии"), tags=("yellow",))
                 self.tree_game.insert("", "end", values=(gf, self._fmt(gs), "разные версии"), tags=("yellow",))
@@ -971,6 +981,15 @@ print("OK")
                                font=self.FONT_B, fg_color=C["accent"], hover_color=C["accent_h"], text_color="#FFFFFF", command=self._create_backup)
         up_btn.pack(side="right", padx=0)
         
+        self.backup_prog_frame = ctk.CTkFrame(page, fg_color="transparent")
+        self.backup_lbl = ctk.CTkLabel(self.backup_prog_frame, text="Прогресс: 0% | Оценка времени: --:--", font=self.FONT_B, text_color=C["text"])
+        self.backup_lbl.pack(anchor="w", padx=20, pady=(5, 0))
+        self.backup_pb = ctk.CTkProgressBar(self.backup_prog_frame, progress_color=C["accent"], height=10)
+        self.backup_pb.set(0)
+        self.backup_pb.pack(fill="x", padx=20, pady=5)
+        self.backup_log = ctk.CTkTextbox(self.backup_prog_frame, height=80, font=self.MONO, fg_color=C["section"], text_color=C["text_dim"])
+        self.backup_log.pack(fill="x", padx=20, pady=(0, 10))
+        
         list_frame = ctk.CTkFrame(page, fg_color=C["section"], corner_radius=12)
         list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         
@@ -998,6 +1017,11 @@ print("OK")
             ssh = SSHManager(gc["host"], gc["user"], gc["password"])
             ok, msg = ssh.connect()
             if not ok: self.log_message(f"Бекапы недоступны:\n{msg}", True); return
+            
+            ok, out = ssh.execute_command("screen -ls | grep admin_backup")
+            if out and "admin_backup" in out:
+                self.after(0, self._start_monitor_backup)
+                
             b_dir = f"{gc['remote_dir']}/backups"
             ssh.execute_command(f"mkdir -p {b_dir}")
             ok, out = ssh.execute_command(f"ls -lh --time-style=long-iso {b_dir}")
@@ -1044,16 +1068,101 @@ print("OK")
             args = self.config_manager.get("backups", "7z_args")
             
             excl_cmd = " ".join([f"-x!{f.strip()}" for f in excl.split(",") if f.strip()])
-            cmd = f"cd {gc['remote_dir']} && 7z a {args} {b_dir}/{b_name} ./* {excl_cmd}"
             
-            self.log_message(f"Сжатие файлов в {b_name}...")
-            ssh.execute_command(cmd)
+            log_file = f"{gc['remote_dir']}/backups/backup_progress.log"
+            ssh.execute_command(f"rm -f {log_file}")
+            
+            cmd = f"cd {gc['remote_dir']} && 7z a -bsp1 {args} {b_dir}/{b_name} ./* {excl_cmd} >> {log_file} 2>&1"
+            screen_cmd = f"screen -dmS admin_backup bash -c '{cmd}'"
+            
+            self.log_message(f"Сжатие файлов в {b_name} (Фоновый процесс)...")
+            ssh.execute_command(screen_cmd)
             ssh.disconnect()
             
-            self.after(0, self.refresh_backups)
-            self.log_message(f"Резервное копирование завершено ({b_name})!")
+            self.after(0, self._start_monitor_backup)
             
         threading.Thread(target=t, daemon=True).start()
+
+    _backup_monitoring = False
+
+    def _start_monitor_backup(self):
+        """
+        [RU] Функция _start_monitor_backup.
+        [EN] Function _start_monitor_backup.
+        """
+        if self._backup_monitoring: return
+        self._backup_monitoring = True
+        self.backup_prog_frame.pack(fill="x", before=self.tree_backups.master)
+        
+        def t():
+            """
+            [RU] Функция t.
+            [EN] Function t.
+            """
+            gc = self.config_manager.get("game_server")
+            ssh = SSHManager(gc["host"], gc["user"], gc["password"])
+            if not ssh.connect()[0]:
+                self._backup_monitoring = False
+                return
+            
+            log_file = f"{gc['remote_dir']}/backups/backup_progress.log"
+            start_time = time.time()
+            last_pct_recorded = 0
+            
+            while self._backup_monitoring:
+                ok, ls_out = ssh.execute_command("screen -ls | grep admin_backup")
+                is_running = (ls_out and "admin_backup" in ls_out)
+                
+                ok, log_out = ssh.execute_command(f"tail -c 2000 {log_file} 2>/dev/null")
+                if log_out:
+                    lines = log_out.replace('\\r', '\\n').split('\\n')
+                    last_pct = last_pct_recorded
+                    files_added = []
+                    for line in lines:
+                        m = re.search(r'(\\d+)%\\s+(.*)', line)
+                        if m:
+                            pct = int(m.group(1))
+                            last_pct = pct
+                            fname = m.group(2).strip()
+                            fname = re.sub(r'^\\d+\\s*\\+\\s*', '', fname)
+                            if fname and fname != "U" and not fname.startswith("U "):
+                                files_added.append(fname)
+                    
+                    if last_pct > 0:
+                        last_pct_recorded = last_pct
+                        elapsed = time.time() - start_time
+                        eta_sec = (elapsed / last_pct) * (100 - last_pct) if last_pct > 0 else 0
+                        mins, secs = divmod(int(eta_sec), 60)
+                        
+                        def update_ui(p=last_pct, ms=mins, ss=secs, fa=files_added):
+                            self.backup_pb.set(p / 100.0)
+                            self.backup_lbl.configure(text=f"Прогресс: {p}% | Оценка времени: {ms:02d}:{ss:02d}")
+                            if fa:
+                                self.backup_log.insert("end", fa[-1] + "\\n")
+                                self.backup_log.see("end")
+                                
+                        self.after(0, update_ui)
+                
+                if not is_running:
+                    break
+                time.sleep(2)
+                
+            ssh.disconnect()
+            self._backup_monitoring = False
+            self.after(0, self._finish_monitor)
+            
+        threading.Thread(target=t, daemon=True).start()
+
+    def _finish_monitor(self):
+        """
+        [RU] Функция _finish_monitor.
+        [EN] Function _finish_monitor.
+        """
+        self.backup_prog_frame.pack_forget()
+        self.backup_pb.set(0)
+        self.backup_log.delete("1.0", "end")
+        self.log_message("Бекап завершен.")
+        self.refresh_backups()
 
     # ═══════════════════════════════════════════════════════════
     #  SETTINGS
