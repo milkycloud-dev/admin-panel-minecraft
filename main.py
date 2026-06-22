@@ -1,5 +1,5 @@
 """
-Minecraft Admin Panel v1.3.4
+Minecraft Admin Panel v1.3.5
 Standalone App with Auto-updater, Custom Fonts, Backups and White-Labeling.
 """
 import os
@@ -487,12 +487,14 @@ class AdminPanel(ctk.CTk):
         [RU] Функция scan_mods.
         [EN] Function scan_mods.
         """
-        def task():
+        for t in (self.tree_client, self.tree_game):
+            for i in t.get_children(): t.delete(i)
+        self.log_message("[Система] Сканирование модов на серверах...")
+        def t():
             """
-            [RU] Функция task.
-            [EN] Function task.
+            [RU] Функция t.
+            [EN] Function t.
             """
-            self.log_message("Сканирование модов на серверах...")
             for t in (self.tree_client, self.tree_game, self.tree_local):
                 for i in t.get_children(): t.delete(i)
             cm, c_err = self.sync_manager.get_remote_mods("client_server")
@@ -549,7 +551,8 @@ class AdminPanel(ctk.CTk):
             for f in g_only: self.tree_game.insert("", "end", values=(f, self._fmt(gm[f]["size"]), "только здесь"), tags=("blue",))
             for _ in range(pad_g): self.tree_game.insert("", "end", values=("", "", ""), tags=())
             self._refresh_local()
-        threading.Thread(target=task, daemon=True).start()
+            self.log_message("[Система] Списки модов обновлены и сверены.")
+        threading.Thread(target=t, daemon=True).start()
 
     def _refresh_local(self):
         """
@@ -981,6 +984,10 @@ print("OK")
                                font=self.FONT_B, fg_color=C["accent"], hover_color=C["accent_h"], text_color="#FFFFFF", command=self._create_backup)
         up_btn.pack(side="right", padx=0)
         
+        ref_btn = ctk.CTkButton(header, text="Обновить список", width=130, height=36, corner_radius=18,
+                                font=self.FONT_B, fg_color=C["section"], hover_color=C["hover"], text_color=C["text"], command=self.refresh_backups)
+        ref_btn.pack(side="right", padx=10)
+        
         self.backup_prog_frame = ctk.CTkFrame(page, fg_color="transparent")
         self.backup_lbl = ctk.CTkLabel(self.backup_prog_frame, text="Прогресс: 0% | Оценка времени: --:--", font=self.FONT_B, text_color=C["text"])
         self.backup_lbl.pack(anchor="w", padx=20, pady=(5, 0))
@@ -1008,6 +1015,7 @@ print("OK")
         [EN] Function refresh_backups.
         """
         for i in self.tree_backups.get_children(): self.tree_backups.delete(i)
+        self.log_message("[Система] Обновление списка бекапов...")
         def t():
             """
             [RU] Функция t.
@@ -1036,6 +1044,7 @@ print("OK")
                         if name.endswith('.7z') or name.endswith('.zip') or name.endswith('.tar.gz'):
                             self.tree_backups.insert("", "end", values=(name, size, date))
             ssh.disconnect()
+            self.log_message("[Система] Список бекапов успешно получен.")
         threading.Thread(target=t, daemon=True).start()
 
     def _create_backup(self):
@@ -1108,6 +1117,7 @@ print("OK")
             log_file = f"{gc['remote_dir']}/backups/backup_progress.log"
             start_time = time.time()
             last_pct_recorded = 0
+            last_logged_line = ""
             
             while self._backup_monitoring:
                 ok, ls_out = ssh.execute_command("screen -ls | grep admin_backup")
@@ -1119,7 +1129,10 @@ print("OK")
                     last_pct = last_pct_recorded
                     files_added = []
                     for line in lines:
-                        m = re.search(r'(\\d+)%\\s+(.*)', line)
+                        if "command not found" in line.lower() or "error" in line.lower() or "не найден" in line.lower():
+                            if line.strip() and line.strip() not in files_added:
+                                files_added.append(f"ОШИБКА: {line.strip()}")
+                        m = re.search(r'(\d+)%\s+(.*)', line)
                         if m:
                             pct = int(m.group(1))
                             last_pct = pct
@@ -1135,11 +1148,15 @@ print("OK")
                         mins, secs = divmod(int(eta_sec), 60)
                         
                         def update_ui(p=last_pct, ms=mins, ss=secs, fa=files_added):
+                            nonlocal last_logged_line
                             self.backup_pb.set(p / 100.0)
                             self.backup_lbl.configure(text=f"Прогресс: {p}% | Оценка времени: {ms:02d}:{ss:02d}")
                             if fa:
-                                self.backup_log.insert("end", fa[-1] + "\\n")
-                                self.backup_log.see("end")
+                                new_line = fa[-1]
+                                if new_line != last_logged_line:
+                                    self.backup_log.insert("end", new_line + "\n")
+                                    self.backup_log.see("end")
+                                    last_logged_line = new_line
                                 
                         self.after(0, update_ui)
                 
