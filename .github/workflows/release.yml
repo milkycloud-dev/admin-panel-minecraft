@@ -28,7 +28,12 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk
+          sudo apt-get install -y python3-tk upx-ucl
+
+      - name: Install UPX (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install upx
 
       - name: Install Python dependencies
         run: |
@@ -39,12 +44,12 @@ jobs:
       - name: Build with Flet pack (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          flet pack main.py --name AdminPanel-Windows --icon "icon.png" --add-data "fonts;fonts" --add-data "icon.png;." -y --exclude-module numpy --exclude-module PIL --exclude-module tkinter --exclude-module pandas --exclude-module matplotlib --exclude-module IPython
+          flet pack main.py --name AdminPanel-Windows --icon "icon.png" --add-data "fonts;fonts" --add-data "icon.png;." -y --exclude-module numpy --exclude-module PIL --exclude-module tkinter --exclude-module pandas --exclude-module matplotlib --exclude-module IPython --exclude-module pytest --exclude-module unittest --exclude-module pydoc --exclude-module sqlite3 --exclude-module setuptools --exclude-module IPython --exclude-module notebook --exclude-module scipy
 
       - name: Build with Flet pack (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          flet pack main.py --name AdminPanel-Linux --add-data "fonts:fonts" --add-data "icon.png:." -y --exclude-module numpy --exclude-module PIL --exclude-module tkinter --exclude-module pandas --exclude-module matplotlib --exclude-module IPython
+          flet pack main.py --name AdminPanel-Linux --add-data "fonts:fonts" --add-data "icon.png:." -y --exclude-module numpy --exclude-module PIL --exclude-module tkinter --exclude-module pandas --exclude-module matplotlib --exclude-module IPython --exclude-module pytest --exclude-module unittest --exclude-module pydoc --exclude-module sqlite3 --exclude-module setuptools --exclude-module IPython --exclude-module notebook --exclude-module scipy
 
       - name: Upload Release Asset (Windows)
         if: matrix.os == 'windows-latest'
