@@ -2,63 +2,65 @@
   <img src="logo.png" alt="Minecraft Admin Panel Logo" width="200" style="border-radius: 20px; box-shadow: 0px 4px 10px rgba(0,0,0,0.5);"/>
   
   # Minecraft Admin Panel
-  **Профессиональное решение для администрирования серверов Minecraft**
+  **Professional Administration Solution for Minecraft Servers**
   
   [![Release](https://img.shields.io/github/v/release/milkycloud-dev/admin-panel-minecraft?style=for-the-badge&color=0078D4)](https://github.com/milkycloud-dev/admin-panel-minecraft/releases)
   [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-brightgreen?style=for-the-badge)](https://github.com/milkycloud-dev/admin-panel-minecraft/releases)
   [![UI](https://img.shields.io/badge/UI-Flet_Framework-blue?style=for-the-badge)](https://flet.dev)
+
+  *[Читать на русском](README_ru.md)*
 </div>
 
 ---
 
-**Minecraft Admin Panel** — это десктопное приложение, разработанное для оптимизации и автоматизации процессов управления серверами Minecraft. Архитектура приложения построена на базе фреймворка **Flet** (Flutter), что обеспечивает кроссплатформенность, высокую скорость отклика и современный пользовательский интерфейс.
+**Minecraft Admin Panel** is a desktop application designed to optimize and automate Minecraft server management processes. The application architecture is built on the **Flet** (Flutter) framework, which ensures cross-platform compatibility, high responsiveness, and a modern user interface.
 
-## Ключевые возможности
+## Key Features
 
-- **Автоматизация деплоя модификаций:** Прямая интеграция по протоколу SFTP обеспечивает синхронизацию файлов (удаление устаревших и загрузку новых версий модов) в автоматическом режиме.
-- **Интегрированная консоль RCON:** Безопасное дистанционное управление сервером через встроенный терминал с поддержкой истории команд и подсветкой синтаксиса системных логов.
-- **Модуль резервного копирования:** Локальное архивирование данных средствами 7-Zip с поддержкой динамических исключений директорий (например, `world` или `logs`) для минимизации нагрузки на накопитель.
-- **Оптимизированная сборка:** Бинарные файлы для сред Windows и Linux проходят стадию экстремального сжатия алгоритмом UPX, обеспечивая высокую портативность и минимальный размер исполняемого файла.
-- **Система доставки обновлений:** Интегрированный модуль автоматической верификации версий обеспечивает бесшовное обновление приложения напрямую из репозитория GitHub.
+- **Automated Mod Deployment:** Direct integration via the SFTP protocol provides automatic file synchronization (removing outdated and uploading new mod versions).
+- **Integrated RCON Console:** Secure remote server management through a built-in terminal featuring command history and syntax highlighting for system logs.
+- **Backup Module:** Local data archiving using 7-Zip with support for dynamic directory exclusions (e.g., `world` or `logs`) to minimize storage load.
+- **Optimized Build:** Binary files for Windows and Linux environments undergo extreme compression using the UPX algorithm, ensuring high portability and minimal executable size.
+- **Update Delivery System:** An integrated automatic version verification module provides seamless application updates directly from the GitHub repository.
 
-## Развертывание и настройка
+## Deployment and Configuration
 
-Приложение поставляется в виде скомпилированного исполняемого файла, не требующего установки. Все конфигурационные данные сохраняются локально в файле `admin_settings.json`, который генерируется автоматически при первом запуске.
+The application is distributed as a compiled executable file and requires no installation. All configuration data is stored locally in the `admin_settings.json` file, which is generated automatically upon the first launch.
 
-### Требования к инфраструктуре
-- Операционная система: Windows 10/11 (64-bit) или современные дистрибутивы Linux.
-- Наличие установленного архиватора 7-Zip (рекомендуется добавить в системную переменную `PATH`) для корректной работы модуля резервного копирования.
-- Доступность SSH/SFTP на целевом сервере для синхронизации файлов.
+### Infrastructure Requirements
+- Operating System: Windows 10/11 (64-bit) or modern Linux distributions.
+- Installed 7-Zip archiver (adding it to the `PATH` system variable is recommended) for the backup module to function correctly.
+- SSH/SFTP accessibility on the target server for file synchronization.
 
-### Инструкция по сборке из исходного кода
+### Build from Source Instructions
 
-Для самостоятельной компиляции исполняемого файла необходима установленная среда Python 3.11+.
+To manually compile the executable file, a Python 3.11+ environment is required.
 
-1. Клонируйте репозиторий:
+1. Clone the repository:
 ```bash
 git clone https://github.com/milkycloud-dev/admin-panel-minecraft.git
 cd admin-panel-minecraft
 ```
 
-2. Установите необходимые зависимости:
+2. Install the necessary dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Выполните сборку с использованием `flet pack`. Для оптимизации размера рекомендуется исключить неиспользуемые модули:
+3. Build using `flet pack`. To optimize the size, it is recommended to exclude unused modules:
 ```bash
 flet pack main.py --name AdminPanel-Windows --icon "icon.png" --add-data "fonts;fonts" --add-data "icon.png;." -y --exclude-module numpy --exclude-module pandas --exclude-module PIL --exclude-module tkinter
 ```
-После завершения процесса компиляции готовый бинарный файл будет доступен в директории `dist`.
+Upon completion of the compilation process, the ready binary file will be available in the `dist` directory.
 
-## Технологический стек
-- **Ядро:** Python 3.11+
-- **Интерфейс:** Flet Framework (Flutter)
-- **Сетевое взаимодействие:** Paramiko (SFTP/SSH)
-- **Компиляция:** PyInstaller & UPX
-- **Шифрование:** Blake3 (верификация целостности обновлений)
+## Technology Stack
+- **Core:** Python 3.11+
+- **UI:** Flet Framework (Flutter)
+- **Networking:** Paramiko (SFTP/SSH)
+- **Compilation:** PyInstaller & UPX
+- **Encryption:** Blake3 (update integrity verification)
 
 ---
 <div align="center">
-  <i>Решение для эффективного управления инфраструктурой Minecraft.</i>
+  <i>Solution for efficient Minecraft infrastructure management.</i>
 </div>
