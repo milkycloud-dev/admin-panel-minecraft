@@ -5,9 +5,10 @@ import sys
 import subprocess
 import threading
 from tkinter import messagebox
-import customtkinter as ctk
+import tkinter as tk
+from tkinter import ttk
 
-CURRENT_VERSION = "2.0.0"
+CURRENT_VERSION = "2.0.1"
 REPO_API = "https://api.github.com/repos/milkycloud-dev/admin-panel-minecraft/releases/latest"
 
 def check_for_updates(app_window):
@@ -74,16 +75,16 @@ def download_and_apply_update(app_window, url):
     to replace the current file, and restarts the program.
     """
     # [RU] Создаем окно с прогресс-баром / [EN] Create window with progress bar
-    overlay = ctk.CTkToplevel(app_window)
+    overlay = tk.Tk()
     overlay.title("Обновление")
     overlay.geometry("400x150")
     overlay.attributes("-topmost", True)
     overlay.resizable(False, False)
     
-    ctk.CTkLabel(overlay, text="Загрузка обновления...", font=("Inter", 16, "bold")).pack(pady=(20, 10))
-    progress = ctk.CTkProgressBar(overlay, width=300)
+    tk.Label(overlay, text="Загрузка обновления...", font=("Inter", 16, "bold")).pack(pady=(20, 10))
+    progress = ttk.Progressbar(overlay, length=300, mode='determinate')
     progress.pack()
-    progress.set(0)
+    progress['value'] = 0
     
     def t():
         try:
@@ -102,35 +103,24 @@ def download_and_apply_update(app_window, url):
                         f.write(chunk)
                         downloaded += len(chunk)
                         if total_size > 0:
-                            overlay.after(0, progress.set, downloaded / total_size)
+                            overlay.after(0, lambda d=downloaded: progress.configure(value=(d / total_size) * 100))
             
             # [RU] Создаем скрипт для обновления в зависимости от ОС / [EN] Create update script based on OS
             if sys.platform == "win32":
                 bat_path = os.path.join(os.path.dirname(exe_path), "update.bat")
                 with open(bat_path, "w") as f:
-                    f.write(f'''@echo off
-timeout /t 2 /nobreak > nul
-del "{exe_path}"
-move "{new_exe_path}" "{exe_path}"
-start "" "{exe_path}"
-del "%~f0"
-''')
+                    f.write(f'''@echo off\ntimeout /t 2 /nobreak > nul\ndel "{exe_path}"\nmove "{new_exe_path}" "{exe_path}"\nstart "" "{exe_path}"\ndel "%~f0"\n''')
                 subprocess.Popen([bat_path], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
             else:
                 sh_path = os.path.join(os.path.dirname(exe_path), "update.sh")
                 with open(sh_path, "w") as f:
-                    f.write(f'''#!/bin/bash
-sleep 2
-rm "{exe_path}"
-mv "{new_exe_path}" "{exe_path}"
-chmod +x "{exe_path}"
-"{exe_path}" &
-rm "$0"
-''')
+                    f.write(f'''#!/bin/bash\nsleep 2\nrm "{exe_path}"\nmv "{new_exe_path}" "{exe_path}"\nchmod +x "{exe_path}"\n"{exe_path}" &\nrm "$0"\n''')
                 os.chmod(sh_path, 0o755)
                 subprocess.Popen([sh_path], shell=True, start_new_session=True)
             
-            overlay.after(0, app_window.destroy)
+            overlay.after(0, overlay.destroy)
+            if hasattr(app_window, "destroy"):
+                overlay.after(0, app_window.destroy)
         except Exception as e:
             # [RU] Обработка ошибок загрузки / [EN] Handle download errors
             overlay.after(0, overlay.destroy)

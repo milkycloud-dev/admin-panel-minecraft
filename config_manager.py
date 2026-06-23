@@ -1,8 +1,8 @@
 import json
 import os
 import shutil
+import tkinter as tk
 import tkinter.messagebox as messagebox
-import customtkinter as ctk
 import tkinter.filedialog as filedialog
 
 class ConfigManager:
@@ -31,7 +31,7 @@ class ConfigManager:
         prompts user to import an existing one or create a new empty one.
         """
         if not os.path.exists(self.config_path):
-            root = ctk.CTk()
+            root = tk.Tk()
             root.withdraw()
             
             answer = messagebox.askyesnocancel(
