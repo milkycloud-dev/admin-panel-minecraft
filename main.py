@@ -924,7 +924,7 @@ class SettingsTab(ft.Container):
         self._reset_timer = False
         self._reset_count = 0
 
-    def _on_local_dir_picked(self, e: ft.FilePickerResultEvent):
+    def _on_local_dir_picked(self, e):
         if e.path:
             self._sv[("paths", "local_mods_dir")].value = e.path
             self._sv[("paths", "local_mods_dir")].update()
