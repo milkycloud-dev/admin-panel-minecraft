@@ -85,7 +85,8 @@ class SyncTab(ft.Container):
 
         self.mods_lv = ft.ListView(spacing=2, expand=True)
 
-        self.file_picker = ft.FilePicker(on_result=self._on_local_file_picked)
+        self.file_picker = ft.FilePicker()
+        self.file_picker.on_result = self._on_local_file_picked
 
         cs_conf = self.ctx.config_manager.get("client_server")
         gs_conf = self.ctx.config_manager.get("game_server")
@@ -896,10 +897,9 @@ class SettingsTab(ft.Container):
         self._scard("Игровой сервер", "game_server", [("name","Название",False),("host","Хост",False),("user","Логин",False),("password","Пароль",True),("remote_dir","Путь к серверу",False), ("screen_name", "Имя Screen", False)])
         self._scard("Настройки бекапа", "backups", [("excluded_folders", "Исключения (через запятую)", False), ("7z_args", "Аргументы 7z", False)])
         
-        # Local path
-        self.file_picker = ft.FilePicker()
-        self.file_picker.on_result = self._on_local_file_picked
-        self.ctx.page.overlay.append(self.file_picker)
+        self.dir_picker = ft.FilePicker()
+        self.dir_picker.on_result = self._on_local_dir_picked
+        self.ctx.page.overlay.append(self.dir_picker)
         var = ft.TextField(value=self.ctx.config_manager.get("paths", "local_mods_dir") or "mods", expand=True, bgcolor=C["bg"], border_color=ft.colors.TRANSPARENT, color=C["text"])
         self._sv[("paths", "local_mods_dir")] = var
         self.content.controls.append(
