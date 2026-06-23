@@ -36,15 +36,15 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build with PyInstaller (Windows)
+      - name: Build with Flet pack (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          pyinstaller --onefile --noconfirm --windowed --icon "icon.png" --add-data "fonts;fonts" --add-data "icon.png;." -n AdminPanel-Windows main.py
+          flet pack main.py --name AdminPanel-Windows --icon "icon.png" --add-data "fonts;fonts" --add-data "icon.png;." -y
 
-      - name: Build with PyInstaller (Linux)
+      - name: Build with Flet pack (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          pyinstaller --onefile --noconfirm --windowed --add-data "fonts:fonts" --add-data "icon.png:." -n AdminPanel-Linux main.py
+          flet pack main.py --name AdminPanel-Linux --add-data "fonts:fonts" --add-data "icon.png:." -y
 
       - name: Upload Release Asset (Windows)
         if: matrix.os == 'windows-latest'
