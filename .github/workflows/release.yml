@@ -44,12 +44,12 @@ jobs:
       - name: Build with Flet pack (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          flet pack main.py --name AdminPanel-Windows --icon "icon.png" --add-data "fonts;fonts" --add-data "icon.png;." -y --exclude-module numpy --exclude-module PIL --exclude-module tkinter --exclude-module pandas --exclude-module matplotlib --exclude-module IPython --exclude-module pytest --exclude-module unittest --exclude-module pydoc --exclude-module sqlite3 --exclude-module setuptools --exclude-module IPython --exclude-module notebook --exclude-module scipy
+          flet pack main.py --name AdminPanel-Windows --icon "icon.png" --add-data "fonts;fonts" --add-data "icon.png;." -y
 
       - name: Build with Flet pack (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          flet pack main.py --name AdminPanel-Linux --add-data "fonts:fonts" --add-data "icon.png:." -y --exclude-module numpy --exclude-module PIL --exclude-module tkinter --exclude-module pandas --exclude-module matplotlib --exclude-module IPython --exclude-module pytest --exclude-module unittest --exclude-module pydoc --exclude-module sqlite3 --exclude-module setuptools --exclude-module IPython --exclude-module notebook --exclude-module scipy
+          flet pack main.py --name AdminPanel-Linux --add-data "fonts:fonts" --add-data "icon.png:." -y
 
       - name: Upload Release Asset (Windows)
         if: matrix.os == 'windows-latest'
