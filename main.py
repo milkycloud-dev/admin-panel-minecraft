@@ -139,7 +139,7 @@ class SyncTab(ft.Container):
         self._upload_target = server_key
         self.file_picker.pick_files(allow_multiple=True, allowed_extensions=["jar"])
 
-    def _on_local_file_picked(self, e: ft.FilePickerResultEvent):
+    def _on_local_file_picked(self, e):
         if not e.files: return
         target_server = self._upload_target
         self.ctx.logger.log(f"Загрузка {len(e.files)} модов на {target_server}...")
