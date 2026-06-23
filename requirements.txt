@@ -1,4 +1,4 @@
-customtkinter
+flet
 paramiko
 blake3
 Pillow

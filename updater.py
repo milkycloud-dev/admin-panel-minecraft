@@ -7,7 +7,7 @@ import threading
 from tkinter import messagebox
 import customtkinter as ctk
 
-CURRENT_VERSION = "1.3.9"
+CURRENT_VERSION = "2.0.0"
 REPO_API = "https://api.github.com/repos/milkycloud-dev/admin-panel-minecraft/releases/latest"
 
 def check_for_updates(app_window):

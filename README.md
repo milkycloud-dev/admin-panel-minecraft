@@ -1,16 +1,16 @@
-# NoteBuns Admin Panel
+# NoteBuns Admin Panel v2.0.0
 
 ## Overview
 
-The NoteBuns Admin Panel is a proprietary, standalone graphical user interface (GUI) application designed for the centralized management of remote game servers and associated web resources via the SSH protocol. This utility provides an efficient interface for synchronizing modifications, executing remote commands, and performing secure server backups without the overhead of traditional web-based control panels.
+The NoteBuns Admin Panel is a proprietary, standalone graphical user interface (GUI) application designed for the centralized management of remote game servers and associated web resources via the SSH protocol. Version 2.0.0 introduces a complete UI overhaul using the **Flet** framework, providing a much smoother, reactive, and modern experience.
 
 ## Key Capabilities
 
-* **Modification Synchronization Framework**: A robust system for comparing local modification files (.jar) against remote counterparts, enabling automated, differential synchronization across multiple nodes, including client download servers and primary game instances.
-* **Integrated Remote Console**: Secure shell (SSH) integration allows direct connection to active server processes (e.g., `screen` sessions). Administrators can monitor live output and issue commands in real-time.
-* **Automated Backup Operations**: Facilitates the creation of highly compressed archives (7z format) of the server directory, featuring a configurable exclusion list to prevent the archiving of temporary or excessively large directories (e.g., logs, caches).
-* **Self-Updating Architecture**: The application incorporates an automated update mechanism that interfaces directly with the official GitHub release pipeline, ensuring the software remains current with minimal administrative intervention.
-* **Secure Configuration Management**: All authentication credentials and operational parameters are stored securely within a local configuration file (`admin_settings.json`), preventing the inclusion of sensitive data within the source code.
+* **Modification Synchronization Framework**: A robust system for comparing local modification files (.jar) against remote counterparts, enabling automated, differential synchronization across multiple nodes. Version 2.0.0 introduces a unified, synchronized scrolling view for both servers, making comparisons effortless.
+* **Integrated Remote Console**: Secure shell (SSH) integration allows direct connection to active server processes (e.g., `screen` sessions). Administrators can monitor live output and issue commands in real-time, now with full interactive terminal support and ANSI filtering.
+* **Automated Backup Operations**: Facilitates the creation of highly compressed archives (7z format) of the server directory, featuring a configurable exclusion list and contextual management (deletion/downloading) from the GUI.
+* **Self-Updating Architecture**: The application incorporates an automated update mechanism that interfaces directly with the official GitHub release pipeline, ensuring the software remains current.
+* **Secure Configuration Management**: All authentication credentials and operational parameters are stored securely within a local configuration file (`admin_settings.json`).
 
 ## Deployment Guidelines
 
@@ -39,9 +39,6 @@ The application leverages a JSON-formatted configuration file generated in the w
         "password": "YOUR_PASSWORD",
         "remote_dir": "/root/minecraft",
         "screen_name": "minecraft_screen_session_name"
-    },
-    "paths": {
-        "local_mods_dir": "mods"
     },
     "backups": {
         "excluded_folders": "bluemap, dynmap, coreprotect, logs, crash-reports, cache, backups",

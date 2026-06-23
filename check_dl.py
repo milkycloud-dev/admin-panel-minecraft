@@ -11,7 +11,7 @@ from ssh_manager import SSHManager
 # [RU] Инициализация менеджера конфигурации / [EN] Initialize configuration manager
 c = ConfigManager()
 # [RU] Получение настроек сервера загрузок / [EN] Get download server settings
-conf = c.get('download_server')
+conf = c.get('client_server')
 
 # [RU] Создание SSH-менеджера и подключение / [EN] Create SSH manager and connect
 ssh = SSHManager(conf['host'], conf['user'], conf['password'])
@@ -19,7 +19,7 @@ ssh.connect()
 
 # [RU] Проверка содержимого папки модов / [EN] Check mods folder contents
 # Check what's in the client/mods directory — only .jar files?
-ok, out = ssh.execute_command('ls -la /var/www/download.inflexus.world/client/mods/ | head -20')
+ok, out = ssh.execute_command('ls -la /var/www/download.inflexus.world/mods/ | head -20')
 print("=== DL /client/mods/ (first 20) ===")
 print(out)
 

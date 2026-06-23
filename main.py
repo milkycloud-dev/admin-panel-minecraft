@@ -1,7 +1,3 @@
-"""
-Minecraft Admin Panel v1.3.9
-Standalone App with Auto-updater, Custom Fonts, Backups and White-Labeling.
-"""
 import os
 import re
 import threading
@@ -11,19 +7,16 @@ import subprocess
 import base64
 import time
 import ctypes
+import shutil
+import datetime
 
 try:
-    import customtkinter as ctk
-    from tkinter import messagebox, ttk, filedialog, Menu
-    from PIL import Image, ImageTk
+    import flet as ft
     import paramiko
     import blake3
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install",
-                           "paramiko", "blake3", "customtkinter", "Pillow"])
-    import customtkinter as ctk
-    from tkinter import messagebox, ttk, filedialog, Menu
-    from PIL import Image, ImageTk
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "paramiko", "blake3", "flet", "Pillow"])
+    import flet as ft
     import paramiko
     import blake3
 
@@ -55,678 +48,345 @@ C = {
     "row_red":   "#4D1B1B"
 }
 
-ctk.set_appearance_mode("Dark")
+def fmt_size(s):
+    if s < 1024: return f"{s} B"
+    elif s < 1048576: return f"{s//1024} KB"
+    else: return f"{s/1048576:.1f} MB"
 
-def _inject_font_to_os(font_path):
-    """
-    [RU] Функция _inject_font_to_os.
-    [EN] Function _inject_font_to_os.
-    """
-    if sys.platform == "win32":
-        try:
-            FR_PRIVATE = 0x10
-            FR_NOT_ENUM = 0x20
-            ctypes.windll.gdi32.AddFontResourceExW(font_path, FR_PRIVATE | FR_NOT_ENUM, 0)
-        except Exception:
-            pass
+def mod_base(f):
+    name = f.rsplit('.jar', 1)[0]
+    m = re.match(r'^([a-zA-Z_\-]+?)[\-_]?\d', name)
+    return m.group(1).rstrip('-_').lower() if m else name.lower()
 
-class AdminPanel(ctk.CTk):
+class Logger(ft.Container):
     def __init__(self):
-        """
-        [RU] Функция __init__.
-        [EN] Function __init__.
-        """
-        super().__init__()
-        self.title("Minecraft Admin Panel")
-        self.geometry("1300x800")
-        self.configure(fg_color=C["bg"])
-        self.minsize(1000, 650)
+        super().__init__(height=150)
+        self.lv = ft.ListView(expand=True, spacing=5, auto_scroll=True)
+        self.content = self.lv
+        self.bgcolor = C["section"]
+        self.padding = 10
+        self.border_radius = 0
 
-        icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
-        if os.path.exists(icon_path):
-            try:
-                img = Image.open(icon_path)
-                self._icon_photo = ImageTk.PhotoImage(img.resize((64, 64)))
-                self.iconphoto(True, self._icon_photo)
-            except Exception:
-                pass
+    def log(self, msg, is_error=False):
+        t = datetime.datetime.now().strftime("%H:%M:%S")
+        prefix = "[ОШИБКА] " if is_error else "[СИСТЕМА] "
+        color = C["red"] if is_error else C["text_dim"]
+        self.lv.controls.append(ft.Text(f"[{t}] {prefix}{msg}", color=color, font_family="Consolas", size=12))
+        if self.page:
+            try: self.update()
+            except: pass
 
-        self._load_fonts()
-
-        self.config_manager = ConfigManager()
-        self.manifest_manager = ManifestManager(self.config_manager)
-        self.sync_manager = SyncManager(self.config_manager)
-
+class SyncTab(ft.Container):
+    def __init__(self, ctx):
+        super().__init__(expand=True, padding=20)
+        self.ctx = ctx
         self.client_mods_cache = {}
         self.game_mods_cache = {}
 
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=0)
+        self.mods_lv = ft.ListView(spacing=2, expand=True)
 
-        self._build_sidebar()
-        
-        self.log_frame = ctk.CTkFrame(self, fg_color=C["section"], height=120, corner_radius=0)
-        self.log_frame.grid(row=1, column=1, sticky="ews")
-        self.log_frame.pack_propagate(False)
-        self.live_log = ctk.CTkTextbox(self.log_frame, font=self.MONO_S, fg_color="transparent", text_color=C["text_dim"])
-        self.live_log.pack(fill="both", expand=True, padx=10, pady=10)
+        self.file_picker = ft.FilePicker(on_result=self._on_local_file_picked)
 
-        self._pages = {}
-        self._build_sync_hub()
-        self._build_game_console()
-        self._build_backups()
-        self._build_settings()
-        self._setup_bindings()
-        self._show_page("sync")
-        self.after(500, self.scan_mods)
-        
-        # Check for updates in background
-        check_for_updates(self)
+        cs_conf = self.ctx.config_manager.get("client_server")
+        gs_conf = self.ctx.config_manager.get("game_server")
 
-    def log_message(self, msg, is_error=False):
-        """
-        [RU] Функция log_message.
-        [EN] Function log_message.
-        """
-        import datetime
-        t = datetime.datetime.now().strftime("%H:%M:%S")
-        prefix = "[ОШИБКА] " if is_error else "[СИСТЕМА] "
-        line = f"[{t}] {prefix}{msg}\n"
-        def _append():
-            """
-            [RU] Функция _append.
-            [EN] Function _append.
-            """
-            self.live_log.insert("end", line)
-            if is_error:
-                # Покрасим строку в красный
-                pass
-            self.live_log.see("end")
-        self.after(0, _append)
+        self.content = ft.Column([
+            ft.Row([
+                ft.Text("Управление Модами", size=24, color=C["text"], weight="bold"),
+                ft.Container(expand=True),
+                ft.ElevatedButton("Собрать Manifest", icon=ft.icons.BUILD, bgcolor=C["orange"], color=ft.colors.WHITE, on_click=lambda e: self.update_manifest_only(), style=ft.ButtonStyle(padding=10)),
+                ft.ElevatedButton("Пересканировать", bgcolor=C["accent"], color=ft.colors.WHITE, on_click=lambda e: self.scan_mods())
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            ft.Container(
+                bgcolor=C["section"], border_radius=12, padding=15, expand=True,
+                content=ft.Column([
+                    ft.Row([
+                        self._make_panel_header(cs_conf.get("name", "Клиент-сервер"), cs_conf.get("host", "Не настроен"), "client_server"),
+                        ft.VerticalDivider(width=20, color=ft.colors.TRANSPARENT),
+                        self._make_panel_header(gs_conf.get("name", "Игровой сервер"), gs_conf.get("host", "Не настроен"), "game_server"),
+                    ]),
+                    ft.Row([
+                        ft.Container(content=ft.Text("Мод", weight="bold"), width=250),
+                        ft.Container(content=ft.Text("Размер", weight="bold"), width=80),
+                        ft.Container(content=ft.Text("Статус", weight="bold"), expand=True),
+                        ft.Container(width=40),
+                        ft.VerticalDivider(width=20, color=C["bg"]),
+                        ft.Container(content=ft.Text("Мод", weight="bold"), width=250),
+                        ft.Container(content=ft.Text("Размер", weight="bold"), width=80),
+                        ft.Container(content=ft.Text("Статус", weight="bold"), expand=True),
+                        ft.Container(width=40)
+                    ]),
+                    self.mods_lv
+                ])
+            )
+        ], expand=True, spacing=20)
 
-    def _setup_bindings(self):
-        """
-        [RU] Функция _setup_bindings.
-        [EN] Function _setup_bindings.
-        """
-        # Поддержка копирования/вставки на английской раскладке
-        self.bind_all("<Control-a>", lambda e: self.focus_get().event_generate("<<SelectAll>>") if hasattr(self.focus_get(), 'event_generate') else None)
-        self.bind_all("<Control-c>", lambda e: self.focus_get().event_generate("<<Copy>>") if hasattr(self.focus_get(), 'event_generate') else None)
-        self.bind_all("<Control-v>", lambda e: self.focus_get().event_generate("<<Paste>>") if hasattr(self.focus_get(), 'event_generate') else None)
-        self.bind_all("<Control-x>", lambda e: self.focus_get().event_generate("<<Cut>>") if hasattr(self.focus_get(), 'event_generate') else None)
-        
-        # Обработка русской раскладки через коды клавиш
-        def _on_key(e):
-            """
-            [RU] Функция _on_key.
-            [EN] Function _on_key.
-            """
-            if e.state & 4: # Control is pressed
-                if e.keycode == 65: # A
-                    if hasattr(self.focus_get(), 'event_generate'): self.focus_get().event_generate("<<SelectAll>>")
-                elif e.keycode == 67: # C
-                    if hasattr(self.focus_get(), 'event_generate'): self.focus_get().event_generate("<<Copy>>")
-                elif e.keycode == 86: # V
-                    if hasattr(self.focus_get(), 'event_generate'): self.focus_get().event_generate("<<Paste>>")
-                elif e.keycode == 88: # X
-                    if hasattr(self.focus_get(), 'event_generate'): self.focus_get().event_generate("<<Cut>>")
-        self.bind_all("<Key>", _on_key, add="+")
+        self.ctx.page.overlay.extend([self.file_picker])
+        threading.Thread(target=self.scan_mods, daemon=True).start()
 
-    def _load_fonts(self):
-        """
-        [RU] Функция _load_fonts.
-        [EN] Function _load_fonts.
-        """
-        f_dir = os.path.join(os.path.dirname(__file__), "fonts")
-        
-        has_custom = False
-        try:
-            p1 = os.path.join(f_dir, "Inter.ttf")
-            p2 = os.path.join(f_dir, "Inter-Bold.ttf")
-            if os.path.exists(p1):
-                ctk.FontManager.load_font(p1)
-                _inject_font_to_os(p1)
-                has_custom = True
-            if os.path.exists(p2):
-                ctk.FontManager.load_font(p2)
-                _inject_font_to_os(p2)
-                has_custom = True
-        except Exception:
-            pass
+    def _make_panel_header(self, title, ip, server_key):
+        btns = [
+            ft.ElevatedButton("Скачать все", icon=ft.icons.DOWNLOAD, on_click=lambda e, sk=server_key: self._dl_all(sk), style=ft.ButtonStyle(padding=10)),
+            ft.ElevatedButton("Загрузить", icon=ft.icons.UPLOAD, on_click=lambda e, sk=server_key: self._trigger_upload_local(sk), style=ft.ButtonStyle(padding=10))
+        ]
+        return ft.Column([
+            ft.Text(title, size=18, color=C["text"], weight="bold", max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+            ft.Text(ip, size=12, color=C["text_dim"], max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+            ft.Row(btns, wrap=True)
+        ], expand=True)
 
-        if has_custom:
-            self.F_FAM = ("Inter", "Segoe UI", "Helvetica")
-            self.F_FAM_H = ("Inter", "Segoe UI", "Helvetica")
-        else:
-            self.F_FAM = ("Segoe UI Variable Display", "Segoe UI", "Helvetica")
-            self.F_FAM_H = self.F_FAM
+    def _trigger_upload_local(self, server_key):
+        self._upload_target = server_key
+        self.file_picker.pick_files(allow_multiple=True, allowed_extensions=["jar"])
 
-        self.FONT_XL  = (self.F_FAM_H[0], 24, "bold")
-        self.FONT_L   = (self.F_FAM_H[0], 18, "bold")
-        self.FONT     = (self.F_FAM[0], 14)
-        self.FONT_B   = (self.F_FAM[0], 14, "bold")
-        self.FONT_S   = (self.F_FAM[0], 12)
-        self.MONO     = ("Consolas", 14)
-        self.MONO_S   = ("Consolas", 12)
+    def _on_local_file_picked(self, e: ft.FilePickerResultEvent):
+        if not e.files: return
+        target_server = self._upload_target
+        self.ctx.logger.log(f"Загрузка {len(e.files)} модов на {target_server}...")
+        def t():
+            c = self.ctx.config_manager.get(target_server)
+            s = SSHManager(c["host"], c["user"], c["password"])
+            ok, msg = s.connect()
+            if not ok: self.ctx.logger.log(f"Ошибка: {msg}", True); return
+            for f in e.files:
+                s.upload_file(f.path, f"{c['remote_dir']}/mods/{f.name}")
+            s.disconnect()
+            self.ctx.logger.log(f"Загружено {len(e.files)} модов на {target_server}.")
+            self.scan_mods()
+        threading.Thread(target=t, daemon=True).start()
 
-    # ═══════════════════════════════════════════════════════════
-    #  SIDEBAR
-    # ═══════════════════════════════════════════════════════════
-    def _build_sidebar(self):
-        """
-        [RU] Функция _build_sidebar.
-        [EN] Function _build_sidebar.
-        """
-        sb = ctk.CTkFrame(self, width=240, fg_color=C["bg2"], corner_radius=0)
-        sb.grid(row=0, column=0, rowspan=2, sticky="ns")
-        sb.grid_propagate(False)
-
-        ctk.CTkLabel(sb, text="Minecraft", font=self.FONT_XL, text_color=C["text"]).pack(pady=(30, 2), anchor="w", padx=20)
-        ctk.CTkLabel(sb, text="Admin Panel", font=self.FONT_S, text_color=C["text_dim"]).pack(pady=(0, 30), anchor="w", padx=20)
-
-        self._sb_btns = {}
+    def _make_mod_cell(self, filename, size_str, status_str, color, server_key, index=0):
+        if not filename:
+            return ft.Container(expand=True)
+        other = "game_server" if server_key == "client_server" else "client_server"
+        c1 = self.ctx.config_manager.get(server_key, "name")
+        c2 = self.ctx.config_manager.get(other, "name")
         items = [
-            ("sync",    "📦  Управление Модами"),
-            ("console", "💻  Игровая Консоль"),
-            ("backups", "💾  Бекапы"),
-            ("settings","⚙️  Настройки"),
+            ft.PopupMenuItem(text=f"Перебросить на {c2}", on_click=lambda e, _sk=server_key, _ot=other, _fn=filename: self._transfer(_sk, _ot, _fn)),
+            ft.PopupMenuItem(text="Скачать локально", on_click=lambda e, _sk=server_key, _fn=filename: self._dl_local(_sk, _fn)),
+            ft.PopupMenuItem(text=f"Удалить с {c1}", on_click=lambda e, _sk=server_key, _fn=filename: self._delete(_sk, _fn))
         ]
 
-        for key, text in items:
-            btn = ctk.CTkButton(sb, text=text, anchor="w", height=40, corner_radius=8,
-                                font=self.FONT_B, fg_color="transparent", hover_color=C["section"],
-                                text_color=C["text_dim"],
-                                command=lambda k=key: self._show_page(k))
-            btn.pack(fill="x", padx=15, pady=4)
-            self._sb_btns[key] = btn
-
-    def _show_page(self, key):
-        """
-        [RU] Функция _show_page.
-        [EN] Function _show_page.
-        """
-        for k, btn in self._sb_btns.items():
-            if k == key:
-                btn.configure(fg_color=C["section"], text_color=C["text"])
-            else:
-                btn.configure(fg_color="transparent", text_color=C["text_dim"])
-                
-        for k, fr in self._pages.items():
-            fr.grid(row=0, column=1, sticky="nsew") if k == key else fr.grid_forget()
-            
-        if key == "console" and not getattr(self, "_console_checked", False):
-            self._console_checked = True
-            self._check_server_status()
-            self._start_live_stream()
-            
-        if key == "backups":
-            self.refresh_backups()
-
-    # ═══════════════════════════════════════════════════════════
-    #  MODS HUB
-    # ═══════════════════════════════════════════════════════════
-    def _build_sync_hub(self):
-        """
-        [RU] Функция _build_sync_hub.
-        [EN] Function _build_sync_hub.
-        """
-        page = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0)
-        self._pages["sync"] = page
-
-        header = ctk.CTkFrame(page, fg_color="transparent")
-        header.pack(fill="x", padx=20, pady=(20, 10))
-
-        ctk.CTkLabel(header, text="Управление Модами", font=self.FONT_XL, text_color=C["text"]).pack(side="left")
-        
-        sc_btn = ctk.CTkButton(header, text="Пересканировать", width=140, height=36, corner_radius=18,
-                               font=self.FONT_B, fg_color=C["accent"], hover_color=C["accent_h"], text_color="#FFFFFF", command=self.scan_mods)
-        sc_btn.pack(side="right", padx=0)
-
-        # Main Layout: 3 Columns
-        panels_container = ctk.CTkFrame(page, fg_color="transparent")
-        panels_container.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        panels_container.columnconfigure(0, weight=1)
-        panels_container.columnconfigure(1, weight=0)
-        panels_container.columnconfigure(2, weight=1)
-        panels_container.rowconfigure(0, weight=1)
-
-        style = ttk.Style()
-        style.theme_use("default")
-        style.configure("NB.Treeview", background=C["section"], foreground=C["text"], fieldbackground=C["section"], borderwidth=0, font=self.FONT_S, rowheight=26)
-        style.configure("NB.Treeview.Heading", background=C["section"], foreground=C["text_dim"], font=self.FONT_B, borderwidth=0, relief="flat", padding=(0, 5))
-        style.map("NB.Treeview", background=[("selected", C["accent"])])
-
-        def _make_panel(parent, col, title, ip, server_key, is_client=False):
-            """
-            [RU] Функция _make_panel.
-            [EN] Function _make_panel.
-            """
-            c = ctk.CTkFrame(parent, fg_color=C["section"], corner_radius=12)
-            c.grid(row=0, column=col, sticky="nsew")
-            
-            th = ctk.CTkFrame(c, fg_color="transparent")
-            th.pack(fill="x", padx=15, pady=(15, 10))
-            
-            th_left = ctk.CTkFrame(th, fg_color="transparent")
-            th_left.pack(side="left")
-            ctk.CTkLabel(th_left, text=title, font=self.FONT_L, text_color=C["text"]).pack(anchor="w")
-            ctk.CTkLabel(th_left, text=ip, font=self.FONT_S, text_color=C["text_dim"]).pack(anchor="w")
-
-            th_right = ctk.CTkFrame(th, fg_color="transparent")
-            th_right.pack(side="right")
-            
-            up_btn = ctk.CTkButton(th_right, text="Загрузить .jar", width=110, height=30, corner_radius=15,
-                                   font=self.FONT_B, fg_color=C["bg2"], hover_color=C["hover"], text_color=C["text"], command=lambda: self.upload_local_mod(server_key))
-            up_btn.pack(side="right", padx=(10, 0), pady=(5,0))
-
-            if is_client:
-                mf_btn = ctk.CTkButton(th_right, text="Собрать Manifest", width=130, height=30, corner_radius=15,
-                                       font=self.FONT_B, fg_color=C["orange"], hover_color="#FF7B1A", text_color="#FFFFFF", command=self.update_manifest_only)
-                mf_btn.pack(side="right", padx=(10, 0), pady=(5,0))
-
-            tf = ctk.CTkFrame(c, fg_color="transparent")
-            tf.pack(fill="both", expand=True, padx=15, pady=(0, 15))
-            
-            tree = ttk.Treeview(tf, columns=("file", "size", "status"), show="headings", style="NB.Treeview")
-            tree.heading("file", text="Мод")
-            tree.heading("size", text="Размер")
-            tree.heading("status", text="Статус")
-            tree.column("file", width=200, minwidth=100)
-            tree.column("size", width=80, minwidth=60, anchor="e")
-            tree.column("status", width=120, minwidth=80, anchor="center")
-            
-            for tag in ("green", "yellow", "blue", "red"):
-                tree.tag_configure(tag, background=C[f"row_{tag}"])
-            
-            tree.pack(side="left", fill="both", expand=True)
-            return tree
-
-        cs_conf = self.config_manager.get("client_server")
-        gs_conf = self.config_manager.get("game_server")
-
-        self.tree_client = _make_panel(panels_container, 0, cs_conf.get("name", "Клиент-сервер"), cs_conf.get("host", "Не настроен"), "client_server", is_client=True)
-        self.tree_game = _make_panel(panels_container, 2, gs_conf.get("name", "Игровой сервер"), gs_conf.get("host", "Не настроен"), "game_server")
-
-        # Centralized Scrollbar
-        scroll_frame = ctk.CTkFrame(panels_container, fg_color="transparent", width=20)
-        scroll_frame.grid(row=0, column=1, sticky="ns", padx=5)
-        
-        self.center_scroll = ttk.Scrollbar(scroll_frame, orient="vertical")
-        self.center_scroll.pack(fill="y", expand=True)
-
-        def sync_yview(*args):
-            """
-            [RU] Функция sync_yview.
-            [EN] Function sync_yview.
-            """
-            self.tree_client.yview(*args)
-            self.tree_game.yview(*args)
-            
-        def set_scroll(*args):
-            """
-            [RU] Функция set_scroll.
-            [EN] Function set_scroll.
-            """
-            self.center_scroll.set(*args)
-            self.tree_client.yview_moveto(args[0])
-            self.tree_game.yview_moveto(args[0])
-
-        self.center_scroll.configure(command=sync_yview)
-        self.tree_client.configure(yscrollcommand=set_scroll)
-        self.tree_game.configure(yscrollcommand=set_scroll)
-        
-        def on_mw(e): 
-            """
-            [RU] Функция on_mw.
-            [EN] Function on_mw.
-            """
-            self.tree_client.yview_scroll(int(-1*(e.delta/120)), "units")
-            self.tree_game.yview_scroll(int(-1*(e.delta/120)), "units")
-            return "break"
-        self.tree_client.bind("<MouseWheel>", on_mw)
-        self.tree_game.bind("<MouseWheel>", on_mw)
-
-        self.tree_client.bind("<Button-3>", lambda e: self._ctx(e, "client_server", self.tree_client))
-        self.tree_game.bind("<Button-3>", lambda e: self._ctx(e, "game_server", self.tree_game))
-
-        # Local folder
-        loc = ctk.CTkFrame(page, fg_color=C["section"], corner_radius=12, height=180)
-        loc.pack(fill="x", padx=20, pady=(10, 20))
-        loc.pack_propagate(False)
-
-        lh = ctk.CTkFrame(loc, fg_color="transparent")
-        lh.pack(fill="x", padx=15, pady=10)
-        ctk.CTkLabel(lh, text="Локальная папка", font=self.FONT_L, text_color=C["text"]).pack(side="left")
-        self.local_path_var = ctk.StringVar(value=os.path.join(os.path.dirname(os.path.abspath(__file__)), self.config_manager.get("paths", "local_mods_dir") or "mods"))
-        ctk.CTkLabel(lh, textvariable=self.local_path_var, font=self.FONT_S, text_color=C["text_dim"]).pack(side="left", padx=15)
-        
-        ctk.CTkButton(lh, text="Обзор", width=60, height=28, corner_radius=14, font=self.FONT_S, fg_color=C["hover"], hover_color=C["border"], command=self._choose_local_dir).pack(side="right", padx=0)
-        ctk.CTkButton(lh, text="На Клиент", width=100, height=28, corner_radius=14, font=self.FONT_S, fg_color=C["bg2"], command=lambda: self._upload_local_to("client_server")).pack(side="right", padx=10)
-        ctk.CTkButton(lh, text="На Игровой", width=100, height=28, corner_radius=14, font=self.FONT_S, fg_color=C["bg2"], command=lambda: self._upload_local_to("game_server")).pack(side="right", padx=10)
-
-        self.tree_local = ttk.Treeview(loc, columns=("file", "size"), show="headings", style="NB.Treeview")
-        self.tree_local.heading("file", text="Мод")
-        self.tree_local.heading("size", text="Размер")
-        self.tree_local.column("file", width=500, minwidth=200)
-        self.tree_local.column("size", width=120, minwidth=80, anchor="e")
-        self.tree_local.pack(fill="both", expand=True, padx=15, pady=(0, 15))
-        self.tree_local.bind("<Button-3>", self._ctx_local)
-
-    @staticmethod
-    def _mod_base(f):
-        """
-        [RU] Функция _mod_base.
-        [EN] Function _mod_base.
-        """
-        name = f.rsplit('.jar', 1)[0]
-        m = re.match(r'^([a-zA-Z_\-]+?)[\-_]?\d', name)
-        return m.group(1).rstrip('-_').lower() if m else name.lower()
-
-    @staticmethod
-    def _fmt(s):
-        """
-        [RU] Функция _fmt.
-        [EN] Function _fmt.
-        """
-        if s < 1024: return f"{s} B"
-        elif s < 1048576: return f"{s//1024} KB"
-        else: return f"{s/1048576:.1f} MB"
-
-    def _choose_local_dir(self):
-        """
-        [RU] Функция _choose_local_dir.
-        [EN] Function _choose_local_dir.
-        """
-        d = filedialog.askdirectory(title="Выберите папку с модами")
-        if d: self.local_path_var.set(d); self._refresh_local()
-
-    def _ctx(self, event, server_key, tree):
-        """
-        [RU] Функция _ctx.
-        [EN] Function _ctx.
-        """
-        item = tree.identify_row(event.y)
-        if not item: return
-        tree.selection_set(item)
-        fn = tree.item(item, "values")[0]
-        if not fn: return
-        other = "game_server" if server_key == "client_server" else "client_server"
-        
-        ol = self.config_manager.get(other, "name")
-        tl = self.config_manager.get(server_key, "name")
-        
-        m = Menu(self, tearoff=0, font=self.FONT_S, bg=C["section"], fg=C["text"], activebackground=C["accent"], activeforeground="white", borderwidth=0)
-        m.add_command(label=f"Перебросить на {ol}", command=lambda: self._transfer(server_key, other, fn))
-        m.add_command(label="Скачать локально", command=lambda: self._dl_local(server_key, fn))
-        m.add_separator()
-        m.add_command(label=f"Удалить с {tl}", command=lambda: self._delete(server_key, fn))
-        m.post(event.x_root, event.y_root)
-
-    def _ctx_local(self, event):
-        """
-        [RU] Функция _ctx_local.
-        [EN] Function _ctx_local.
-        """
-        item = self.tree_local.identify_row(event.y)
-        if not item: return
-        self.tree_local.selection_set(item)
-        fn = self.tree_local.item(item, "values")[0]
-        ap = os.path.join(self.local_path_var.get(), fn)
-        
-        m = Menu(self, tearoff=0, font=self.FONT_S, bg=C["section"], fg=C["text"], activebackground=C["accent"], activeforeground="white", borderwidth=0)
-        m.add_command(label="Загрузить на Клиент", command=lambda: self._up1(ap, "client_server"))
-        m.add_command(label="Загрузить на Игровой", command=lambda: self._up1(ap, "game_server"))
-        m.add_separator()
-        m.add_command(label="Удалить файл", command=lambda: self._del_local(ap, fn))
-        m.post(event.x_root, event.y_root)
+        return ft.Container(
+            content=ft.Row([
+                ft.Container(content=ft.Text(filename, color=color, size=13, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, tooltip=filename), width=250),
+                ft.Container(content=ft.Text(size_str, color=color, size=13, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS), width=80),
+                ft.Container(content=ft.Text(status_str, color=color, size=13, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS), expand=True),
+                ft.PopupMenuButton(items=items, icon=ft.icons.MORE_VERT, tooltip="Действия")
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            bgcolor=ft.colors.WHITE10 if index % 2 == 0 else ft.colors.TRANSPARENT,
+            padding=ft.padding.only(left=5, right=5),
+            border_radius=4,
+            expand=True
+        )
 
     def scan_mods(self):
-        """
-        [RU] Функция scan_mods.
-        [EN] Function scan_mods.
-        """
-        for t in (self.tree_client, self.tree_game):
-            for i in t.get_children(): t.delete(i)
-        self.log_message("[Система] Сканирование модов на серверах...")
-        def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            for t in (self.tree_client, self.tree_game, self.tree_local):
-                for i in t.get_children(): t.delete(i)
-            import time
-            cm, c_err = None, None
-            while True:
-                cm, c_err = self.sync_manager.get_remote_mods("client_server")
-                if c_err and "Authentication failed" in c_err:
-                    self.log_message("Неверный логин или пароль для Клиент-сервера.", True)
-                    break
-                elif c_err:
-                    self.log_message(f"Ошибка Клиент: {c_err}. Переподключение через 3с...", True)
-                    time.sleep(3)
-                else:
-                    break
+        self.mods_lv.controls.clear()
+        self.ctx.logger.log("[Система] Сканирование модов на серверах...")
+        try: self.ctx.page.update()
+        except: pass
+
+        cm, c_err = None, None
+        while True:
+            cm, c_err = self.ctx.sync_manager.get_remote_mods("client_server")
+            if c_err and "Authentication failed" in c_err:
+                self.ctx.logger.log("Неверный логин или пароль для Клиент-сервера.", True)
+                break
+            elif c_err:
+                self.ctx.logger.log(f"Ошибка Клиент: {c_err}. Переподключение через 3с...", True)
+                time.sleep(3)
+            else:
+                break
+        
+        gm, g_err = None, None
+        while True:
+            gm, g_err = self.ctx.sync_manager.get_remote_mods("game_server")
+            if g_err and "Authentication failed" in g_err:
+                self.ctx.logger.log("Неверный логин или пароль для Игрового сервера.", True)
+                break
+            elif g_err:
+                self.ctx.logger.log(f"Ошибка Игровой: {g_err}. Переподключение через 3с...", True)
+                time.sleep(3)
+            else:
+                break
+
+        cm = cm or {}; gm = gm or {}
+        self.client_mods_cache = cm; self.game_mods_cache = gm
+        cb = {}; [cb.setdefault(mod_base(f), []).append(f) for f in cm]
+        gb = {}; [gb.setdefault(mod_base(f), []).append(f) for f in gm]
+        matched, partial, c_only, g_only = [], [], [], []; pc, pg = set(), set()
+        
+        for f in sorted(set(cm) & set(gm), key=str.lower):
+            if cm[f]["size"] == gm[f]["size"]:
+                hash_match = True
+                if cm[f].get("hash") and gm[f].get("hash") and cm[f]["hash"] != gm[f]["hash"]:
+                    hash_match = False
+                matched.append((f, f, cm[f]["size"], gm[f]["size"], hash_match))
+            else: 
+                partial.append((f, f, cm[f]["size"], gm[f]["size"]))
+            pc.add(f); pg.add(f)
             
-            gm, g_err = None, None
-            while True:
-                gm, g_err = self.sync_manager.get_remote_mods("game_server")
-                if g_err and "Authentication failed" in g_err:
-                    self.log_message("Неверный логин или пароль для Игрового сервера.", True)
-                    break
-                elif g_err:
-                    self.log_message(f"Ошибка Игровой: {g_err}. Переподключение через 3с...", True)
-                    time.sleep(3)
-                else:
-                    break
+        for b, cfs in sorted(cb.items()):
+            if b in gb:
+                for cf in cfs:
+                    if cf in pc: continue
+                    for gf in gb[b]:
+                        if gf in pg: continue
+                        partial.append((cf, gf, cm[cf]["size"], gm[gf]["size"]))
+                        pc.add(cf); pg.add(gf); break
+                        
+        [c_only.append(f) for f in sorted(set(cm) - pc, key=str.lower)]
+        [g_only.append(f) for f in sorted(set(gm) - pg, key=str.lower)]
 
-            cm = cm or {}; gm = gm or {}
-            self.client_mods_cache = cm; self.game_mods_cache = gm
-            cb = {}; [cb.setdefault(self._mod_base(f), []).append(f) for f in cm]
-            gb = {}; [gb.setdefault(self._mod_base(f), []).append(f) for f in gm]
-            matched, partial, c_only, g_only = [], [], [], []; pc, pg = set(), set()
-            for f in sorted(set(cm) & set(gm), key=str.lower):
-                if cm[f]["size"] == gm[f]["size"]:
-                    hash_match = True
-                    if cm[f].get("hash") and gm[f].get("hash") and cm[f]["hash"] != gm[f]["hash"]:
-                        hash_match = False
-                    matched.append((f, f, cm[f]["size"], gm[f]["size"], hash_match))
-                else: 
-                    partial.append((f, f, cm[f]["size"], gm[f]["size"]))
-                pc.add(f); pg.add(f)
-            for b, cfs in sorted(cb.items()):
-                if b in gb:
-                    for cf in cfs:
-                        if cf in pc: continue
-                        for gf in gb[b]:
-                            if gf in pg: continue
-                            partial.append((cf, gf, cm[cf]["size"], gm[gf]["size"]))
-                            pc.add(cf); pg.add(gf); break
-            [c_only.append(f) for f in sorted(set(cm) - pc, key=str.lower)]
-            [g_only.append(f) for f in sorted(set(gm) - pg, key=str.lower)]
+        def add_row(c_cell, g_cell):
+            self.mods_lv.controls.append(ft.Row([
+                c_cell,
+                ft.VerticalDivider(width=20, color=C["bg"]),
+                g_cell
+            ]))
 
-            for cf, gf, cs, gs, hash_match in sorted(matched, key=lambda x: x[0].lower()):
-                if hash_match:
-                    self.tree_client.insert("", "end", values=(cf, self._fmt(cs), "✔ совпадает"), tags=("green",))
-                    self.tree_game.insert("", "end", values=(gf, self._fmt(gs), "✔ совпадает"), tags=("green",))
-                else:
-                    self.tree_client.insert("", "end", values=(cf, self._fmt(cs), "❌ суммы разные"), tags=("red",))
-                    self.tree_game.insert("", "end", values=(gf, self._fmt(gs), "❌ суммы разные"), tags=("red",))
-            for cf, gf, cs, gs in sorted(partial, key=lambda x: x[0].lower()):
-                self.tree_client.insert("", "end", values=(cf, self._fmt(cs), "разные версии"), tags=("yellow",))
-                self.tree_game.insert("", "end", values=(gf, self._fmt(gs), "разные версии"), tags=("yellow",))
-            pad_c = max(0, len(g_only) - len(c_only)); pad_g = max(0, len(c_only) - len(g_only))
-            for f in c_only: self.tree_client.insert("", "end", values=(f, self._fmt(cm[f]["size"]), "только здесь"), tags=("blue",))
-            for _ in range(pad_c): self.tree_client.insert("", "end", values=("", "", ""), tags=())
-            for f in g_only: self.tree_game.insert("", "end", values=(f, self._fmt(gm[f]["size"]), "только здесь"), tags=("blue",))
-            for _ in range(pad_g): self.tree_game.insert("", "end", values=("", "", ""), tags=())
-            self._refresh_local()
-            self.log_message("[Система] Списки модов обновлены и сверены.")
+        for cf, gf, cs, gs, hash_match in sorted(matched, key=lambda x: x[0].lower()):
+            idx = len(self.mods_lv.controls)
+            c_cell = self._make_mod_cell(cf, fmt_size(cs), "✔ совпадает" if hash_match else "❌ суммы разные", ft.colors.GREEN_400 if hash_match else ft.colors.RED_400, "client_server", idx)
+            g_cell = self._make_mod_cell(gf, fmt_size(gs), "✔ совпадает" if hash_match else "❌ суммы разные", ft.colors.GREEN_400 if hash_match else ft.colors.RED_400, "game_server", idx)
+            add_row(c_cell, g_cell)
+                
+        for cf, gf, cs, gs in sorted(partial, key=lambda x: x[0].lower()):
+            idx = len(self.mods_lv.controls)
+            c_cell = self._make_mod_cell(cf, fmt_size(cs), "разные версии", ft.colors.YELLOW_400, "client_server", idx)
+            g_cell = self._make_mod_cell(gf, fmt_size(gs), "разные версии", ft.colors.YELLOW_400, "game_server", idx)
+            add_row(c_cell, g_cell)
+            
+        pad_c = max(0, len(g_only) - len(c_only)); pad_g = max(0, len(c_only) - len(g_only))
+        
+        c_items = [self._make_mod_cell(f, fmt_size(cm[f]["size"]), "только здесь", ft.colors.BLUE_400, "client_server", len(matched)+len(partial)+i) for i, f in enumerate(c_only)] + [self._make_mod_cell(None, "", "", None, "client_server") for _ in range(pad_c)]
+        g_items = [self._make_mod_cell(f, fmt_size(gm[f]["size"]), "только здесь", ft.colors.BLUE_400, "game_server", len(matched)+len(partial)+i) for i, f in enumerate(g_only)] + [self._make_mod_cell(None, "", "", None, "game_server") for _ in range(pad_g)]
+        
+        for c, g in zip(c_items, g_items):
+            add_row(c, g)
+        
+        self.ctx.logger.log("[Система] Списки модов обновлены и сверены.")
+        try: self.page.update()
+        except: pass
+
+    def _dl_all(self, server_key):
+        self.ctx.logger.log(f"Скачивание всех модов с {server_key}...")
+        def t():
+            c = self.ctx.config_manager.get(server_key)
+            s = SSHManager(c["host"], c["user"], c["password"])
+            ok, msg = s.connect()
+            if not ok: self.ctx.logger.log(f"Ошибка: {msg}", True); return
+            
+            ok, out = s.execute_command(f"find {c['remote_dir']}/mods -name '*.jar'")
+            if not ok or not out.strip():
+                self.ctx.logger.log("Моды не найдены на сервере.")
+                s.disconnect()
+                return
+                
+            files = out.strip().split('\n')
+            downloaded = 0
+            for file_path in files:
+                if not file_path: continue
+                fname = os.path.basename(file_path)
+                s.download_file(file_path, os.path.join(self.local_path_var.value, fname))
+                downloaded += 1
+                
+            s.disconnect()
+            self.ctx.logger.log(f"Успешно скачано {downloaded} модов.")
+            if hasattr(self.ctx, "local_mods_tab"): self.ctx.local_mods_tab._refresh_local()
         threading.Thread(target=t, daemon=True).start()
-
-    def _refresh_local(self):
-        """
-        [RU] Функция _refresh_local.
-        [EN] Function _refresh_local.
-        """
-        for i in self.tree_local.get_children(): self.tree_local.delete(i)
-        d = self.local_path_var.get(); os.makedirs(d, exist_ok=True)
-        for f in sorted(os.listdir(d)):
-            if f.endswith(".jar") and not f.startswith("."):
-                sz = os.path.getsize(os.path.join(d, f))
-                self.tree_local.insert("", "end", values=(f, self._fmt(sz)))
 
     def _transfer(self, src, dst, fn):
-        """
-        [RU] Функция _transfer.
-        [EN] Function _transfer.
-        """
-        if not messagebox.askyesno("Переброс", f"Перебросить {fn}?"): return
-        self.log_message(f"Переброс {fn} с {src} на {dst}...")
-        def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            c1, c2 = self.config_manager.get(src), self.config_manager.get(dst)
-            s1, s2 = SSHManager(c1["host"],c1["user"],c1["password"]), SSHManager(c2["host"],c2["user"],c2["password"])
-            ok1, m1 = s1.connect()
-            if not ok1: self.log_message(f"Сервер {src}:\n{m1}", True); return
-            ok2, m2 = s2.connect()
-            if not ok2: self.log_message(f"Сервер {dst}:\n{m2}", True); return
-            _, ld = self.sync_manager.get_local_mods()
-            tmp = os.path.join(ld, os.path.basename(fn))
-            try: s1.sftp.get(f"{c1['remote_dir']}/mods/{fn}", tmp); s2.upload_file(tmp, f"{c2['remote_dir']}/mods/{fn}")
-            except Exception as e: self.log_message(f"Ошибка переброса: {str(e)}", True)
-            finally: s1.disconnect(); s2.disconnect(); self.scan_mods(); self.log_message(f"Успешно переброшен {fn}")
-        threading.Thread(target=t, daemon=True).start()
+        def _confirmed(e):
+            dlg.open = False
+            self.page.update()
+            self.ctx.logger.log(f"Переброс {fn} с {src} на {dst}...")
+            def t():
+                c1, c2 = self.ctx.config_manager.get(src), self.ctx.config_manager.get(dst)
+                s1, s2 = SSHManager(c1["host"],c1["user"],c1["password"]), SSHManager(c2["host"],c2["user"],c2["password"])
+                ok1, m1 = s1.connect()
+                if not ok1: self.ctx.logger.log(f"Сервер {src}:\n{m1}", True); return
+                ok2, m2 = s2.connect()
+                if not ok2: self.ctx.logger.log(f"Сервер {dst}:\n{m2}", True); return
+                _, ld = self.ctx.sync_manager.get_local_mods()
+                tmp = os.path.join(ld, os.path.basename(fn))
+                try: 
+                    s1.sftp.get(f"{c1['remote_dir']}/mods/{fn}", tmp)
+                    s2.upload_file(tmp, f"{c2['remote_dir']}/mods/{fn}")
+                except Exception as err: self.ctx.logger.log(f"Ошибка переброса: {str(err)}", True)
+                finally: 
+                    s1.disconnect()
+                    s2.disconnect()
+                    self.scan_mods()
+                    self.ctx.logger.log(f"Успешно переброшен {fn}")
+            threading.Thread(target=t, daemon=True).start()
+
+        dlg = ft.AlertDialog(title=ft.Text("Переброс"), content=ft.Text(f"Перебросить {fn}?"),
+                             actions=[ft.TextButton("Да", on_click=_confirmed), ft.TextButton("Нет", on_click=lambda e: setattr(dlg, 'open', False) or self.page.update())])
+        self.page.overlay.append(dlg)
+        dlg.open = True
+        self.page.update()
 
     def _delete(self, srv, fn):
-        """
-        [RU] Функция _delete.
-        [EN] Function _delete.
-        """
-        if not messagebox.askyesno("Удаление", f"Удалить {fn}?"): return
-        self.log_message(f"Удаление {fn} с сервера {srv}...")
-        def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            c = self.config_manager.get(srv); ssh = SSHManager(c["host"],c["user"],c["password"])
-            ok, msg = ssh.connect()
-            if not ok: self.log_message(f"Ошибка: {msg}", True); return
-            ssh.execute_command(f"rm -f \"{c['remote_dir']}/mods/{fn}\"")
-            ssh.disconnect()
-            self.log_message(f"Удалено {fn}")
-            self.scan_mods()
-        threading.Thread(target=t, daemon=True).start()
+        def _confirmed(e):
+            dlg.open = False
+            self.page.update()
+            self.ctx.logger.log(f"Удаление {fn} с сервера {srv}...")
+            def t():
+                c = self.ctx.config_manager.get(srv); ssh = SSHManager(c["host"],c["user"],c["password"])
+                ok, msg = ssh.connect()
+                if not ok: self.ctx.logger.log(f"Ошибка: {msg}", True); return
+                ssh.execute_command(f"rm -f \"{c['remote_dir']}/mods/{fn}\"")
+                ssh.disconnect()
+                self.ctx.logger.log(f"Удалено {fn}")
+                self.scan_mods()
+            threading.Thread(target=t, daemon=True).start()
+
+        dlg = ft.AlertDialog(title=ft.Text("Удаление"), content=ft.Text(f"Удалить {fn}?"),
+                             actions=[ft.TextButton("Да", on_click=_confirmed), ft.TextButton("Нет", on_click=lambda e: setattr(dlg, 'open', False) or self.page.update())])
+        self.page.overlay.append(dlg)
+        dlg.open = True
+        self.page.update()
 
     def _dl_local(self, srv, fn):
-        """
-        [RU] Функция _dl_local.
-        [EN] Function _dl_local.
-        """
-        self.log_message(f"Скачивание {fn} локально...")
+        self.ctx.logger.log(f"Скачивание {fn} локально...")
         def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            c = self.config_manager.get(srv); ssh = SSHManager(c["host"],c["user"],c["password"])
+            c = self.ctx.config_manager.get(srv); ssh = SSHManager(c["host"],c["user"],c["password"])
             ok, msg = ssh.connect()
-            if not ok: self.log_message(f"Ошибка: {msg}", True); return
-            d = self.local_path_var.get(); os.makedirs(d, exist_ok=True)
+            if not ok: self.ctx.logger.log(f"Ошибка: {msg}", True); return
+            d = self.local_path_var.value; os.makedirs(d, exist_ok=True)
             try: ssh.sftp.get(f"{c['remote_dir']}/mods/{fn}", os.path.join(d, os.path.basename(fn)))
-            except Exception as e: self.log_message(f"Ошибка: {str(e)}", True)
-            finally: ssh.disconnect(); self._refresh_local(); self.log_message(f"Скачано {fn}")
-        threading.Thread(target=t, daemon=True).start()
-
-    def upload_local_mod(self, target_server):
-        """
-        [RU] Функция upload_local_mod.
-        [EN] Function upload_local_mod.
-        """
-        files = filedialog.askopenfilenames(title="Моды (.jar)", filetypes=[("JAR", "*.jar")])
-        if not files: return
-        self.log_message(f"Загрузка {len(files)} модов на {target_server}...")
-        def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            c = self.config_manager.get(target_server)
-            s = SSHManager(c["host"],c["user"],c["password"])
-            ok, msg = s.connect()
-            if not ok: self.log_message(f"Ошибка: {msg}", True); return
-            for f in files:
-                s.upload_file(f, f"{c['remote_dir']}/mods/{os.path.basename(f)}")
-            s.disconnect()
-            self.log_message(f"Загружено {len(files)} модов на {target_server}.")
-            self.scan_mods()
-        threading.Thread(target=t, daemon=True).start()
-
-    def _up1(self, ap, srv):
-        """
-        [RU] Функция _up1.
-        [EN] Function _up1.
-        """
-        if not messagebox.askyesno("Загрузка", f"Загрузить {os.path.basename(ap)}?"): return
-        self.log_message(f"Загрузка {os.path.basename(ap)} на {srv}...")
-        def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            c = self.config_manager.get(srv); ssh = SSHManager(c["host"],c["user"],c["password"])
-            ok, msg = ssh.connect()
-            if not ok: self.log_message(f"Ошибка: {msg}", True); return
-            ssh.upload_file(ap, f"{c['remote_dir']}/mods/{os.path.basename(ap)}")
-            ssh.disconnect()
-            self.log_message(f"Загружено {os.path.basename(ap)}")
-            self.scan_mods()
-        threading.Thread(target=t, daemon=True).start()
-
-    def _upload_local_to(self, srv):
-        """
-        [RU] Функция _upload_local_to.
-        [EN] Function _upload_local_to.
-        """
-        d = self.local_path_var.get()
-        jars = [f for f in os.listdir(d) if f.endswith(".jar") and not f.startswith(".")]
-        if not jars or not messagebox.askyesno("Загрузка", f"Загрузить {len(jars)} модов?"): return
-        self.log_message(f"Загрузка локальной папки на {srv}...")
-        def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            c = self.config_manager.get(srv); ssh = SSHManager(c["host"],c["user"],c["password"])
-            ok, msg = ssh.connect()
-            if not ok: self.log_message(f"Ошибка: {msg}", True); return
-            for j in jars: ssh.upload_file(os.path.join(d,j), f"{c['remote_dir']}/mods/{j}")
-            ssh.disconnect(); self.log_message("Массовая загрузка завершена."); self.scan_mods()
+            except Exception as err: self.ctx.logger.log(f"Ошибка: {str(err)}", True)
+            finally: 
+                ssh.disconnect()
+                if hasattr(self.ctx, "local_mods_tab"): self.ctx.local_mods_tab._refresh_local()
+                self.ctx.logger.log(f"Скачано {fn}")
         threading.Thread(target=t, daemon=True).start()
 
     def update_manifest_only(self):
-        """
-        [RU] Функция update_manifest_only.
-        [EN] Function update_manifest_only.
-        """
-        if not messagebox.askyesno("Manifest", "Пересобрать manifest.json на сервере скачивания?"): return
-        self.log_message("Запущена пересборка manifest.json...")
-        def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            dc = self.config_manager.get("client_server"); db = dc["remote_dir"]
-            ssh = SSHManager(dc["host"],dc["user"],dc["password"])
-            ok, msg = ssh.connect()
-            if not ok: self.log_message(f"Ошибка: {msg}", True); return
-            script = f"""import os,json,blake3
+        def _confirmed(e):
+            dlg.open = False
+            self.ctx.page.update()
+            self.ctx.logger.log("Запущена пересборка manifest.json...")
+            
+            prog_dlg = ft.AlertDialog(
+                title=ft.Text("Сборка Манифеста"),
+                content=ft.Row([
+                    ft.ProgressRing(),
+                    ft.Text(" Идет сканирование файлов и вычисление хешей...", expand=True)
+                ]),
+                modal=True
+            )
+            self.ctx.page.overlay.append(prog_dlg)
+            prog_dlg.open = True
+            self.ctx.page.update()
+            
+            def t():
+                dc = self.ctx.config_manager.get("client_server"); db = dc["remote_dir"]
+                ssh = SSHManager(dc["host"],dc["user"],dc["password"])
+                ok, msg = ssh.connect()
+                if not ok: self.ctx.logger.log(f"Ошибка: {msg}", True); return
+                script = f"""import os,json,blake3
 d='{db}/mods';mp='{db}/manifest.json'
 with open(mp,'r') as f: m=json.load(f)
 m['files']=[f for f in m.get('files',[]) if not f.get('path','').startswith('mods/')]
@@ -741,115 +401,106 @@ for r,_,fs in os.walk(d):
 with open(mp,'w') as f: json.dump(m,f,indent=4)
 print("OK")
 """
-            b = base64.b64encode(script.encode()).decode()
-            ssh.execute_command(f'python3 -c "import base64,sys;exec(base64.b64decode(sys.argv[1]).decode(\'utf-8\'))" {b}')
-            ssh.disconnect()
-            self.log_message("Manifest успешно пересобран!")
-        threading.Thread(target=t, daemon=True).start()
+                b = base64.b64encode(script.encode()).decode()
+                ssh.execute_command(f'python3 -c "import base64,sys;exec(base64.b64decode(sys.argv[1]).decode(\'utf-8\'))" {b}')
+                ssh.disconnect()
+                self.ctx.logger.log("Manifest успешно пересобран!")
+            threading.Thread(target=t, daemon=True).start()
 
+        dlg = ft.AlertDialog(title=ft.Text("Manifest"), content=ft.Text("Пересобрать manifest.json на сервере скачивания?"),
+                             actions=[ft.TextButton("Да", on_click=_confirmed), ft.TextButton("Нет", on_click=lambda e: setattr(dlg, 'open', False) or self.ctx.page.update())])
+        self.ctx.page.overlay.append(dlg)
+        dlg.open = True
+        self.ctx.page.update()
 
-    # ═══════════════════════════════════════════════════════════
-    #  GAME CONSOLE
-    # ═══════════════════════════════════════════════════════════
-    _console_checked = False
-    _live_ssh = None
-    _stream_channel = None
+class ConsoleTab(ft.Container):
+    def __init__(self, ctx):
+        super().__init__(expand=True)
+        self.ctx = ctx
+        self._console_checked = False
+        self._live_ssh = None
+        self._stream_channel = None
+        self._stream_running = False
 
-    def _build_game_console(self):
-        """
-        [RU] Функция _build_game_console.
-        [EN] Function _build_game_console.
-        """
-        page = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0)
-        self._pages["console"] = page
+        self.srv_status = ft.Text("Подключение к серверу...", size=18, color=C["text_dim"])
+        self.console_btns = ft.Row([])
 
-        header = ctk.CTkFrame(page, fg_color="transparent")
-        header.pack(fill="x", padx=20, pady=(20, 10))
+        self.term_out = ft.TextField(multiline=True, read_only=True, expand=True, bgcolor=C["section"], border_color=ft.colors.TRANSPARENT, color=C["text"], text_style=ft.TextStyle(font_family="Consolas"))
+        self.cmd_entry = ft.TextField(expand=True, bgcolor=C["bg"], border_color=ft.colors.TRANSPARENT, color=C["text"], text_style=ft.TextStyle(font_family="Consolas"), hint_text="Ввод команды для screen...", on_submit=self._run_cmd)
 
-        self.srv_status = ctk.CTkLabel(header, text="Подключение к серверу...", font=self.FONT_L, text_color=C["text_dim"])
-        self.srv_status.pack(side="left")
-        
-        self.console_btns = ctk.CTkFrame(header, fg_color="transparent")
-        self.console_btns.pack(side="right")
+        self.content = ft.Column([
+            ft.Row([
+                self.srv_status,
+                ft.Container(expand=True),
+                self.console_btns
+            ]),
+            ft.Container(
+                bgcolor=C["section"], border_radius=12, expand=True, padding=10,
+                content=ft.Column([
+                    self.term_out,
+                    ft.Row([
+                        ft.Text(">", font_family="Consolas", color=C["text_dim"]),
+                        self.cmd_entry
+                    ])
+                ])
+            )
+        ], expand=True)
 
-        term = ctk.CTkFrame(page, fg_color=C["section"], corner_radius=12)
-        term.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-
-        self.term_out = ctk.CTkTextbox(term, font=self.MONO, fg_color=C["section"], text_color=C["text"], border_width=0)
-        self.term_out.pack(fill="both", expand=True, padx=10, pady=(10, 0))
-
-        inp = ctk.CTkFrame(term, fg_color="transparent", height=40)
-        inp.pack(fill="x", padx=15, pady=15)
-        inp.pack_propagate(False)
-        
-        ctk.CTkLabel(inp, text=">", font=self.MONO, text_color=C["text_dim"]).pack(side="left", padx=(0, 10))
-        self.cmd_entry = ctk.CTkEntry(inp, font=self.MONO, fg_color=C["bg"], border_width=0, corner_radius=8, text_color=C["text"], placeholder_text="Ввод команды для screen...")
-        self.cmd_entry.pack(side="left", fill="both", expand=True)
-        self.cmd_entry.bind("<Return>", self._run_cmd)
+        self._check_server_status()
+        self._start_live_stream()
 
     def _tlog(self, text):
-        """
-        [RU] Функция _tlog.
-        [EN] Function _tlog.
-        """
-        self.term_out.insert("end", text + "\n")
-        self.term_out.see("end")
+        if not text: return
+        self.term_out.value = (self.term_out.value or "") + text
+        try: self.term_out.update()
+        except: pass
 
     def _ensure_ssh(self):
-        """
-        [RU] Функция _ensure_ssh.
-        [EN] Function _ensure_ssh.
-        """
         if self._live_ssh and self._live_ssh.ssh and self._live_ssh.ssh.get_transport() and self._live_ssh.ssh.get_transport().is_active():
             return True, ""
-        gc = self.config_manager.get("game_server")
+        gc = self.ctx.config_manager.get("game_server")
         if not gc.get("host"): return False, "Хост не указан в настройках"
         self._live_ssh = SSHManager(gc["host"], gc["user"], gc["password"])
         ok, msg = self._live_ssh.connect()
         return ok, msg
 
     def _start_live_stream(self):
-        """
-        [RU] Функция _start_live_stream.
-        [EN] Function _start_live_stream.
-        """
-        if getattr(self, "_stream_running", False): return
+        if self._stream_running: return
         self._stream_running = True
         self._tlog("[Система] Подключение к консоли (ssh)...")
         def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
             ok, msg = self._ensure_ssh()
             if not ok: 
                 self._tlog(f"[Ошибка] SSH сбой: {msg}")
                 self._stream_running = False
-                self.srv_status.configure(text="Сервер недоступен", text_color=C["red"])
+                self.srv_status.value = "Сервер недоступен"
+                self.srv_status.color = C["red"]
+                try: self.srv_status.update()
+                except: pass
                 return
                 
-            gc = self.config_manager.get("game_server")
+            gc = self.ctx.config_manager.get("game_server")
             try:
                 transport = self._live_ssh.ssh.get_transport()
                 self._stream_channel = transport.open_session()
-                self._tlog("[Система] Чтение логов установлено. Ожидание вывода...")
+                self._tlog("[Система] Подключение к сессии screen установлено...\n")
                 
-                stdin, stdout, stderr = self._live_ssh.ssh.exec_command(f"tail -n 100 {gc['remote_dir']}/logs/latest.log", timeout=5)
-                initial_lines = stdout.read().decode('utf-8', errors='ignore')
-                if initial_lines:
-                    self.term_out.insert("end", initial_lines)
-                    self.term_out.see("end")
-                    
+                s_name = gc.get("screen_name", "NoteBuns")
                 self._stream_channel.settimeout(1.0)
-                self._stream_channel.exec_command(f"tail -n 0 -F {gc['remote_dir']}/logs/latest.log")
+                self._stream_channel.get_pty()
+                self._stream_channel.invoke_shell()
+                self._stream_channel.send(f"screen -x {s_name}\n")
                 
                 while self._stream_running:
                     try:
                         if self._stream_channel.recv_ready():
                             data = self._stream_channel.recv(4096).decode("utf-8", errors="ignore")
                             if data:
-                                self.term_out.insert("end", data)
-                                self.term_out.see("end")
+                                # Очистка от ANSI кодов
+                                data = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', data)
+                                self.term_out.value = (self.term_out.value or "") + data
+                                try: self.term_out.update()
+                                except: pass
                     except Exception as e:
                         if "timed out" not in str(e).lower():
                             raise e
@@ -866,186 +517,158 @@ print("OK")
                 self._stream_running = False
         threading.Thread(target=t, daemon=True).start()
 
-    def _run_cmd(self, event=None):
-        """
-        [RU] Функция _run_cmd.
-        [EN] Function _run_cmd.
-        """
-        cmd = self.cmd_entry.get().strip()
+    def _run_cmd(self, e):
+        cmd = self.cmd_entry.value.strip()
         if not cmd: return
-        self.cmd_entry.delete(0, "end")
+        self.cmd_entry.value = ""
+        self.cmd_entry.update()
         def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
             ok, _ = self._ensure_ssh()
             if not ok: return
             safe_cmd = cmd.replace('"', '\\"')
-            s_name = self.config_manager.get("game_server", "screen_name")
+            s_name = self.ctx.config_manager.get("game_server", "screen_name")
             self._live_ssh.execute_command(f'screen -S {s_name} -X stuff "{safe_cmd}\\n"')
         threading.Thread(target=t, daemon=True).start()
 
     def _check_server_status(self):
-        """
-        [RU] Функция _check_server_status.
-        [EN] Function _check_server_status.
-        """
         def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
             ok, msg = self._ensure_ssh()
             if not ok: self._set_srv("error", msg); return
-            s_name = self.config_manager.get("game_server", "screen_name")
+            s_name = self.ctx.config_manager.get("game_server", "screen_name")
             ok_cmd, out = self._live_ssh.execute_command(f"screen -ls | grep {s_name}")
             if out and s_name in out: self._set_srv("running")
             else: self._set_srv("stopped")
         threading.Thread(target=t, daemon=True).start()
 
     def _set_srv(self, state, msg=""):
-        """
-        [RU] Функция _set_srv.
-        [EN] Function _set_srv.
-        """
-        for w in self.console_btns.winfo_children(): w.destroy()
+        self.console_btns.controls.clear()
+        self.console_btns.controls.append(ft.IconButton(ft.icons.REFRESH, tooltip="Обновить состояние", on_click=lambda e: self._check_server_status()))
         if state == "running":
-            self.srv_status.configure(text="Игровой сервер РАБОТАЕТ", text_color=C["green"])
-            ctk.CTkButton(self.console_btns, text="Перезапустить сервер", width=160, height=36, corner_radius=18, font=self.FONT_B, fg_color=C["section"], hover_color=C["hover"], text_color=C["text"], command=self._restart).pack(side="left", padx=10)
-            ctk.CTkButton(self.console_btns, text="Остановить сервер", width=150, height=36, corner_radius=18, font=self.FONT_B, fg_color=C["red"], hover_color=C["red_h"], command=self._stop).pack(side="left", padx=0)
+            self.srv_status.value = "Игровой сервер РАБОТАЕТ"
+            self.srv_status.color = C["green"]
+            self.console_btns.controls.extend([
+                ft.ElevatedButton("Перезапустить сервер", bgcolor=C["section"], color=C["text"], on_click=self._restart),
+                ft.ElevatedButton("Остановить сервер", bgcolor=C["red"], color=ft.colors.WHITE, on_click=self._stop),
+            ])
         elif state == "stopped":
-            self.srv_status.configure(text="Игровой сервер ОСТАНОВЛЕН", text_color=C["text_dim"])
-            ctk.CTkButton(self.console_btns, text="Запустить сервер", width=150, height=36, corner_radius=18, font=self.FONT_B, fg_color=C["accent"], hover_color=C["accent_h"], command=self._start).pack(side="left", padx=0)
+            self.srv_status.value = "Игровой сервер ОСТАНОВЛЕН"
+            self.srv_status.color = C["text_dim"]
+            self.console_btns.controls.extend([
+                ft.ElevatedButton("Запустить сервер", bgcolor=C["accent"], color=ft.colors.WHITE, on_click=self._start),
+            ])
         else:
-            self.srv_status.configure(text=f"Ошибка: {msg}", text_color=C["red"])
+            self.srv_status.value = f"Ошибка: {msg}"
+            self.srv_status.color = C["red"]
+            
+        try:
+            self.srv_status.update()
+            self.console_btns.update()
+        except: pass
 
-    def _start(self):
-        """
-        [RU] Функция _start.
-        [EN] Function _start.
-        """
+    def _start(self, e):
         self._tlog("[Система] Отправка команды запуска сервера...")
         def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
             if not self._ensure_ssh()[0]: return
-            gc = self.config_manager.get("game_server")
+            gc = self.ctx.config_manager.get("game_server")
             self._live_ssh.execute_command(f"cd {gc['remote_dir']} && ./start.sh &")
             time.sleep(3); self._check_server_status()
         threading.Thread(target=t, daemon=True).start()
 
-    def _stop(self):
-        """
-        [RU] Функция _stop.
-        [EN] Function _stop.
-        """
-        if not messagebox.askyesno("Остановка", "Вы уверены, что хотите остановить игровой сервер?"): return
-        self._tlog("[Система] Отправка команды остановки сервера...")
-        def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            if not self._ensure_ssh()[0]: return
-            s_name = self.config_manager.get("game_server", "screen_name")
-            self._live_ssh.execute_command(f'screen -S {s_name} -X stuff "stop\\n"')
-            time.sleep(5); self._check_server_status()
-        threading.Thread(target=t, daemon=True).start()
+    def _stop(self, e):
+        def _confirmed(e):
+            dlg.open = False
+            self.ctx.page.update()
+            self._tlog("[Система] Отправка команды остановки сервера...")
+            def t():
+                if not self._ensure_ssh()[0]: return
+                s_name = self.ctx.config_manager.get("game_server", "screen_name")
+                self._live_ssh.execute_command(f'screen -S {s_name} -X stuff "stop\\n"')
+                time.sleep(5); self._check_server_status()
+            threading.Thread(target=t, daemon=True).start()
 
-    def _restart(self):
-        """
-        [RU] Функция _restart.
-        [EN] Function _restart.
-        """
-        if not messagebox.askyesno("Перезапуск", "Отправить сервер в перезагрузку?"): return
-        self._tlog("[Система] Рестарт сервера...")
-        def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            if not self._ensure_ssh()[0]: return
-            s_name = self.config_manager.get("game_server", "screen_name")
-            self._live_ssh.execute_command(f'screen -S {s_name} -X stuff "stop\\n"')
-            time.sleep(10)
-            gc = self.config_manager.get("game_server")
-            self._live_ssh.execute_command(f"cd {gc['remote_dir']} && ./start.sh &")
-            time.sleep(3); self._check_server_status()
-        threading.Thread(target=t, daemon=True).start()
+        dlg = ft.AlertDialog(title=ft.Text("Остановка"), content=ft.Text("Вы уверены, что хотите остановить игровой сервер?"),
+                             actions=[ft.TextButton("Да", on_click=_confirmed), ft.TextButton("Нет", on_click=lambda e: setattr(dlg, 'open', False) or self.ctx.page.update())])
+        self.ctx.page.overlay.append(dlg)
+        dlg.open = True
+        self.ctx.page.update()
 
-    # ═══════════════════════════════════════════════════════════
-    #  BACKUPS
-    # ═══════════════════════════════════════════════════════════
-    def _build_backups(self):
-        """
-        [RU] Функция _build_backups.
-        [EN] Function _build_backups.
-        """
-        page = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0)
-        self._pages["backups"] = page
+    def _restart(self, e):
+        def _confirmed(e):
+            dlg.open = False
+            self.ctx.page.update()
+            self._tlog("[Система] Рестарт сервера...")
+            def t():
+                if not self._ensure_ssh()[0]: return
+                s_name = self.ctx.config_manager.get("game_server", "screen_name")
+                self._live_ssh.execute_command(f'screen -S {s_name} -X stuff "stop\\n"')
+                time.sleep(10)
+                gc = self.ctx.config_manager.get("game_server")
+                self._live_ssh.execute_command(f"cd {gc['remote_dir']} && ./start.sh &")
+                time.sleep(3); self._check_server_status()
+            threading.Thread(target=t, daemon=True).start()
 
-        header = ctk.CTkFrame(page, fg_color="transparent")
-        header.pack(fill="x", padx=20, pady=(20, 10))
+        dlg = ft.AlertDialog(title=ft.Text("Перезапуск"), content=ft.Text("Отправить сервер в перезагрузку?"),
+                             actions=[ft.TextButton("Да", on_click=_confirmed), ft.TextButton("Нет", on_click=lambda e: setattr(dlg, 'open', False) or self.ctx.page.update())])
+        self.ctx.page.overlay.append(dlg)
+        dlg.open = True
+        self.ctx.page.update()
 
-        ctk.CTkLabel(header, text="Резервные Копии", font=self.FONT_XL, text_color=C["text"]).pack(side="left")
+class BackupsTab(ft.Container):
+    def __init__(self, ctx):
+        super().__init__(expand=True)
+        self.ctx = ctx
+        self._backup_monitoring = False
         
-        up_btn = ctk.CTkButton(header, text="Создать бекап сервера", width=160, height=36, corner_radius=18,
-                               font=self.FONT_B, fg_color=C["accent"], hover_color=C["accent_h"], text_color="#FFFFFF", command=self._create_backup)
-        up_btn.pack(side="right", padx=0)
+        self.tree_backups = ft.ListView(expand=True, spacing=2)
         
-        ref_btn = ctk.CTkButton(header, text="Обновить список", width=130, height=36, corner_radius=18,
-                                font=self.FONT_B, fg_color=C["section"], hover_color=C["hover"], text_color=C["text"], command=self.refresh_backups)
-        ref_btn.pack(side="right", padx=10)
+        self.backup_lbl = ft.Text("Прогресс: 0% | Оценка времени: --:--", weight="bold")
+        self.backup_pb = ft.ProgressBar(value=0, color=C["accent"], bgcolor=C["section"])
+        self.backup_log = ft.TextField(multiline=True, read_only=True, height=80, text_style=ft.TextStyle(font_family="Consolas"), bgcolor=C["section"], border_color=ft.colors.TRANSPARENT, color=C["text_dim"])
         
-        self.backup_prog_frame = ctk.CTkFrame(page, fg_color="transparent")
-        top_prog_frame = ctk.CTkFrame(self.backup_prog_frame, fg_color="transparent")
-        top_prog_frame.pack(fill="x", padx=20, pady=(5, 0))
-        self.backup_lbl = ctk.CTkLabel(top_prog_frame, text="Прогресс: 0% | Оценка времени: --:--", font=self.FONT_B, text_color=C["text"])
-        self.backup_lbl.pack(side="left")
-        self.cancel_backup_btn = ctk.CTkButton(top_prog_frame, text="Отменить", width=80, height=24, corner_radius=12,
-                                               font=self.FONT, fg_color=C["row_red"], hover_color="#C0392B", text_color="#FFFFFF", command=self._cancel_backup)
-        self.cancel_backup_btn.pack(side="right")
-        self.backup_pb = ctk.CTkProgressBar(self.backup_prog_frame, progress_color=C["accent"], height=10)
-        self.backup_pb.set(0)
-        self.backup_pb.pack(fill="x", padx=20, pady=5)
-        self.backup_log = ctk.CTkTextbox(self.backup_prog_frame, height=80, font=self.MONO, fg_color=C["section"], text_color=C["text_dim"])
-        self.backup_log.pack(fill="x", padx=20, pady=(0, 10))
-        
-        list_frame = ctk.CTkFrame(page, fg_color=C["section"], corner_radius=12)
-        list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-        
-        self.tree_backups = ttk.Treeview(list_frame, columns=("file", "size", "date"), show="headings", style="NB.Treeview")
-        self.tree_backups.heading("file", text="Имя архива")
-        self.tree_backups.heading("size", text="Размер")
-        self.tree_backups.heading("date", text="Дата")
-        self.tree_backups.column("file", width=400)
-        self.tree_backups.column("size", width=100, anchor="e")
-        self.tree_backups.column("date", width=150, anchor="center")
-        self.tree_backups.pack(fill="both", expand=True, padx=15, pady=15)
+        self.backup_prog_frame = ft.Column([
+            ft.Row([self.backup_lbl, ft.Container(expand=True), ft.ElevatedButton("Отменить", bgcolor=C["row_red"], color=ft.colors.WHITE, on_click=self._cancel_backup)]),
+            self.backup_pb,
+            self.backup_log
+        ], visible=False)
+
+        self.content = ft.Column([
+            ft.Row([
+                ft.Text("Резервные Копии", size=24, color=C["text"], weight="bold"),
+                ft.Container(expand=True),
+                ft.ElevatedButton("Обновить список", on_click=lambda e: self.refresh_backups()),
+                ft.ElevatedButton("Создать бекап сервера", bgcolor=C["accent"], color=ft.colors.WHITE, on_click=self._create_backup)
+            ]),
+            self.backup_prog_frame,
+            ft.Container(
+                bgcolor=C["section"], border_radius=12, padding=15, expand=True,
+                content=ft.Column([
+                    ft.Row([
+                        ft.Text("Имя архива", expand=4, weight="bold"),
+                        ft.Text("Размер", expand=1, weight="bold", text_align="right"),
+                        ft.Text("Дата", expand=2, weight="bold", text_align="center")
+                    ]),
+                    self.tree_backups
+                ])
+            )
+        ], expand=True)
+
+        self.refresh_backups()
 
     def refresh_backups(self):
-        """
-        [RU] Функция refresh_backups.
-        [EN] Function refresh_backups.
-        """
-        for i in self.tree_backups.get_children(): self.tree_backups.delete(i)
-        self.log_message("[Система] Обновление списка бекапов...")
+        self.tree_backups.controls.clear()
+        self.ctx.logger.log("[Система] Обновление списка бекапов...")
+        try: self.ctx.page.update()
+        except: pass
+        
         def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            gc = self.config_manager.get("game_server")
+            gc = self.ctx.config_manager.get("game_server")
             ssh = SSHManager(gc["host"], gc["user"], gc["password"])
             ok, msg = ssh.connect()
-            if not ok: self.log_message(f"Бекапы недоступны:\n{msg}", True); return
+            if not ok: self.ctx.logger.log(f"Бекапы недоступны:\n{msg}", True); return
             
             ok, out = ssh.execute_command("screen -ls | grep admin_backup")
             if out and "admin_backup" in out:
-                self.after(0, self._start_monitor_backup)
+                threading.Thread(target=self._start_monitor_backup, daemon=True).start()
                 
             b_dir = f"{gc['remote_dir']}/backups"
             ssh.execute_command(f"mkdir -p {b_dir}")
@@ -1059,107 +682,141 @@ print("OK")
                         date = f"{parts[5]} {parts[6]}"
                         name = " ".join(parts[7:])
                         if name.endswith('.7z') or name.endswith('.zip') or name.endswith('.tar.gz'):
-                            self.tree_backups.insert("", "end", values=(name, size, date))
+                            items = [
+                                ft.PopupMenuItem(text="Удалить бекап", on_click=lambda e, _name=name, _dir=b_dir: self._delete_backup(_dir, _name))
+                            ]
+                            self.tree_backups.controls.append(
+                                ft.Container(
+                                    content=ft.Row([
+                                        ft.Text(name, expand=4),
+                                        ft.Text(size, expand=1, text_align="right"),
+                                        ft.Text(date, expand=2, text_align="center"),
+                                        ft.PopupMenuButton(items=items, icon=ft.icons.MORE_VERT, tooltip="Действия")
+                                    ]),
+                                    bgcolor=ft.colors.WHITE10 if len(self.tree_backups.controls) % 2 == 0 else ft.colors.TRANSPARENT,
+                                    padding=ft.padding.only(left=5, right=5),
+                                    border_radius=4
+                                )
+                            )
             ssh.disconnect()
-            self.log_message("[Система] Список бекапов успешно получен.")
+            self.ctx.logger.log("[Система] Список бекапов успешно получен.")
+            try: self.ctx.page.update()
+            except: pass
         threading.Thread(target=t, daemon=True).start()
 
-    def _cancel_backup(self):
-        """
-        [RU] Функция _cancel_backup.
-        [EN] Function _cancel_backup.
-        """
-        if not messagebox.askyesno("Отмена бекапа", "Вы уверены, что хотите отменить текущий бекап?"): return
-        
-        def t():
-            self.log_message("[Система] Отмена бекапа на сервере...")
-            gc = self.config_manager.get("game_server")
-            ssh = SSHManager(gc["host"], gc["user"], gc["password"], timeout=30)
-            ok, msg = ssh.connect()
-            if ok:
-                ssh.execute_command("screen -X -S admin_backup quit")
-                ssh.execute_command("killall 7z")
-                ssh.disconnect()
-            self._backup_monitoring = False
-            self.after(0, lambda: self.backup_prog_frame.pack_forget())
-            self.log_message("[Система] Бекап успешно отменен.", True)
-        
-        threading.Thread(target=t, daemon=True).start()
+    def _delete_backup(self, b_dir, name):
+        def _confirmed(e):
+            dlg.open = False
+            self.ctx.page.update()
+            self.ctx.logger.log(f"Удаление бекапа {name}...")
+            def t():
+                gc = self.ctx.config_manager.get("game_server")
+                ssh = SSHManager(gc["host"], gc["user"], gc["password"])
+                ok, msg = ssh.connect()
+                if ok:
+                    ssh.execute_command(f"rm -f \"{b_dir}/{name}\"")
+                    ssh.disconnect()
+                    self.ctx.logger.log(f"Бекап {name} удален.")
+                    self.refresh_backups()
+                else:
+                    self.ctx.logger.log(f"Ошибка удаления: {msg}", True)
+            threading.Thread(target=t, daemon=True).start()
 
-    def _create_backup(self):
-        """
-        [RU] Функция _create_backup.
-        [EN] Function _create_backup.
-        """
-        if not messagebox.askyesno("Бекап", "Запустить создание резервной копии сервера? Это может занять время и снизить производительность (TPS)."): return
-        
-        self.log_message("Запущено создание резервной копии сервера. Ждем завершения...")
-        
-        def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            gc = self.config_manager.get("game_server")
-            ssh = SSHManager(gc["host"], gc["user"], gc["password"], timeout=300) # Long timeout for 7z
-            ok, msg = ssh.connect()
-            if not ok:
-                self.log_message(f"Ошибка бекапа: {msg}", True)
-                return
-                
-            ok_7z, out_7z = ssh.execute_command("which 7z")
-            if not ok_7z or not out_7z.strip():
-                self.log_message("Ошибка: 7z не установлен на сервере. Установите: apt install p7zip-full", True)
-                ssh.disconnect()
-                return
-                
-            ok_scr, out_scr = ssh.execute_command("which screen")
-            if not ok_scr or not out_scr.strip():
-                self.log_message("Ошибка: screen не установлен на сервере. Установите: apt install screen", True)
-                ssh.disconnect()
-                return
-                
-            import datetime
-            date_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
-            b_dir = f"{gc['remote_dir']}/backups"
-            b_name = f"backup_{date_str}.7z"
-            
-            excl = self.config_manager.get("backups", "excluded_folders")
-            args = self.config_manager.get("backups", "7z_args")
-            
-            excl_cmd = " ".join([f"-x!{f.strip()}" for f in excl.split(",") if f.strip()])
-            
-            log_file = f"{gc['remote_dir']}/backups/backup_progress.log"
-            ssh.execute_command(f"rm -f {log_file}")
-            
-            cmd = f"cd {gc['remote_dir']} && 7z a -bsp1 {args} {b_dir}/{b_name} ./* {excl_cmd} >> {log_file} 2>&1"
-            screen_cmd = f"screen -dmS admin_backup bash -c '{cmd}'"
-            
-            self.log_message(f"Сжатие файлов в {b_name} (Фоновый процесс)...")
-            ssh.execute_command(screen_cmd)
-            ssh.disconnect()
-            
-            self.after(0, self._start_monitor_backup)
-            
-        threading.Thread(target=t, daemon=True).start()
+        dlg = ft.AlertDialog(title=ft.Text("Удаление"), content=ft.Text(f"Вы уверены, что хотите безвозвратно удалить {name}?"),
+                             actions=[ft.TextButton("Да", on_click=_confirmed), ft.TextButton("Нет", on_click=lambda e: setattr(dlg, 'open', False) or self.ctx.page.update())])
+        self.ctx.page.overlay.append(dlg)
+        dlg.open = True
+        self.ctx.page.update()
 
-    _backup_monitoring = False
+    def _cancel_backup(self, e):
+        def _confirmed(e):
+            dlg.open = False
+            self.ctx.page.update()
+            def t():
+                self.ctx.logger.log("[Система] Отмена бекапа на сервере...")
+                gc = self.ctx.config_manager.get("game_server")
+                ssh = SSHManager(gc["host"], gc["user"], gc["password"], timeout=30)
+                ok, msg = ssh.connect()
+                if ok:
+                    ssh.execute_command("screen -X -S admin_backup quit")
+                    ssh.execute_command("killall 7z")
+                    ssh.disconnect()
+                self._backup_monitoring = False
+                self.backup_prog_frame.visible = False
+                try: self.ctx.page.update()
+                except: pass
+                self.ctx.logger.log("[Система] Бекап успешно отменен.", True)
+            threading.Thread(target=t, daemon=True).start()
+
+        dlg = ft.AlertDialog(title=ft.Text("Отмена"), content=ft.Text("Вы уверены, что хотите отменить текущий бекап?"),
+                             actions=[ft.TextButton("Да", on_click=_confirmed), ft.TextButton("Нет", on_click=lambda e: setattr(dlg, 'open', False) or self.ctx.page.update())])
+        self.ctx.page.overlay.append(dlg)
+        dlg.open = True
+        self.ctx.page.update()
+
+    def _create_backup(self, e):
+        def _confirmed(e):
+            dlg.open = False
+            self.ctx.page.update()
+            self.ctx.logger.log("Запущено создание резервной копии сервера. Ждем завершения...")
+            def t():
+                gc = self.ctx.config_manager.get("game_server")
+                ssh = SSHManager(gc["host"], gc["user"], gc["password"], timeout=300)
+                ok, msg = ssh.connect()
+                if not ok:
+                    self.ctx.logger.log(f"Ошибка бекапа: {msg}", True)
+                    return
+                    
+                ok_7z, out_7z = ssh.execute_command("which 7z")
+                if not ok_7z or not out_7z.strip():
+                    self.ctx.logger.log("Ошибка: 7z не установлен на сервере. Установите: apt install p7zip-full", True)
+                    ssh.disconnect()
+                    return
+                    
+                ok_scr, out_scr = ssh.execute_command("which screen")
+                if not ok_scr or not out_scr.strip():
+                    self.ctx.logger.log("Ошибка: screen не установлен на сервере. Установите: apt install screen", True)
+                    ssh.disconnect()
+                    return
+                    
+                date_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+                b_dir = f"{gc['remote_dir']}/backups"
+                b_name = f"backup_{date_str}.7z"
+                
+                excl = self.ctx.config_manager.get("backups", "excluded_folders")
+                args = self.ctx.config_manager.get("backups", "7z_args")
+                
+                excl_cmd = " ".join([f"-x!{f.strip()}" for f in excl.split(",") if f.strip()])
+                
+                log_file = f"{gc['remote_dir']}/backups/backup_progress.log"
+                ssh.execute_command(f"rm -f {log_file}")
+                
+                cmd = f"cd {gc['remote_dir']} && env LC_ALL=C.UTF-8 7z a -bsp1 {args} {b_dir}/{b_name} ./* {excl_cmd} >> {log_file} 2>&1"
+                screen_cmd = f"screen -dmS admin_backup bash -c '{cmd}'"
+                
+                self.ctx.logger.log(f"Сжатие файлов в {b_name} (Фоновый процесс)...")
+                ssh.execute_command(screen_cmd)
+                ssh.disconnect()
+                
+                threading.Thread(target=self._start_monitor_backup, daemon=True).start()
+                
+            threading.Thread(target=t, daemon=True).start()
+
+        dlg = ft.AlertDialog(title=ft.Text("Бекап"), content=ft.Text("Запустить создание резервной копии сервера? Это может занять время и снизить производительность (TPS)."),
+                             actions=[ft.TextButton("Да", on_click=_confirmed), ft.TextButton("Нет", on_click=lambda e: setattr(dlg, 'open', False) or self.ctx.page.update())])
+        self.ctx.page.overlay.append(dlg)
+        dlg.open = True
+        self.ctx.page.update()
 
     def _start_monitor_backup(self):
-        """
-        [RU] Функция _start_monitor_backup.
-        [EN] Function _start_monitor_backup.
-        """
         if self._backup_monitoring: return
         self._backup_monitoring = True
-        self.backup_prog_frame.pack(fill="x", before=self.tree_backups.master)
+        self.backup_prog_frame.visible = True
+        try: self.ctx.page.update()
+        except: pass
         
         def t():
-            """
-            [RU] Функция t.
-            [EN] Function t.
-            """
-            gc = self.config_manager.get("game_server")
+            gc = self.ctx.config_manager.get("game_server")
             ssh = SSHManager(gc["host"], gc["user"], gc["password"])
             if not ssh.connect()[0]:
                 self._backup_monitoring = False
@@ -1176,7 +833,7 @@ print("OK")
                 
                 ok, log_out = ssh.execute_command(f"tail -c 2000 {log_file} 2>/dev/null")
                 if log_out:
-                    lines = log_out.replace('\\r', '\\n').split('\\n')
+                    lines = log_out.replace('\r', '\n').split('\n')
                     last_pct = last_pct_recorded
                     files_added = []
                     for line in lines:
@@ -1188,7 +845,7 @@ print("OK")
                             pct = int(m.group(1))
                             last_pct = pct
                             fname = m.group(2).strip()
-                            fname = re.sub(r'^\\d+\\s*\\+\\s*', '', fname)
+                            fname = re.sub(r'^\d+\s*\+\s*', '', fname)
                             if fname and fname != "U" and not fname.startswith("U "):
                                 files_added.append(fname)
                     
@@ -1198,18 +855,17 @@ print("OK")
                         eta_sec = (elapsed / last_pct) * (100 - last_pct) if last_pct > 0 else 0
                         mins, secs = divmod(int(eta_sec), 60)
                         
-                        def update_ui(p=last_pct, ms=mins, ss=secs, fa=files_added):
-                            nonlocal last_logged_line
-                            self.backup_pb.set(p / 100.0)
-                            self.backup_lbl.configure(text=f"Прогресс: {p}% | Оценка времени: {ms:02d}:{ss:02d}")
-                            if fa:
-                                new_line = fa[-1]
-                                if new_line != last_logged_line:
-                                    self.backup_log.insert("end", new_line + "\n")
-                                    self.backup_log.see("end")
+                        self.backup_pb.value = last_pct / 100.0
+                        self.backup_lbl.value = f"Прогресс: {last_pct}% | Оценка времени: {mins:02d}:{secs:02d}"
+                        if files_added:
+                            new_line = files_added[-1]
+                            if new_line != last_logged_line:
+                                cleaned_line = ''.join(c for c in new_line if c.isprintable())
+                                if cleaned_line:
+                                    self.backup_log.value = (self.backup_log.value or "") + cleaned_line + "\n"
                                     last_logged_line = new_line
-                                
-                        self.after(0, update_ui)
+                        try: self.ctx.page.update()
+                        except: pass
                 
                 if not is_running:
                     break
@@ -1217,135 +873,198 @@ print("OK")
                 
             ssh.disconnect()
             self._backup_monitoring = False
-            self.after(0, self._finish_monitor)
+            self.backup_prog_frame.visible = False
+            self.backup_pb.value = 0
+            self.backup_log.value = ""
+            self.ctx.logger.log("Бекап завершен.")
+            self.refresh_backups()
+            try: self.ctx.page.update()
+            except: pass
             
         threading.Thread(target=t, daemon=True).start()
 
-    def _finish_monitor(self):
-        """
-        [RU] Функция _finish_monitor.
-        [EN] Function _finish_monitor.
-        """
-        self.backup_prog_frame.pack_forget()
-        self.backup_pb.set(0)
-        self.backup_log.delete("1.0", "end")
-        self.log_message("Бекап завершен.")
-        self.refresh_backups()
-
-    # ═══════════════════════════════════════════════════════════
-    #  SETTINGS
-    # ═══════════════════════════════════════════════════════════
-    def _build_settings(self):
-        """
-        [RU] Функция _build_settings.
-        [EN] Function _build_settings.
-        """
-        page = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0)
-        self._pages["settings"] = page
-        
-        scroll = ctk.CTkScrollableFrame(page, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=20, pady=20)
+class SettingsTab(ft.Container):
+    def __init__(self, ctx):
+        super().__init__(expand=True)
+        self.ctx = ctx
         self._sv = {}
+        
+        self.content = ft.ListView(expand=True, spacing=10)
+        self.content.controls.append(ft.Text("Настройки", size=24, color=C["text"], weight="bold"))
+        
+        self._scard("Клиент-сервер", "client_server", [("name","Название",False),("host","Хост",False),("user","Логин",False),("password","Пароль",True),("remote_dir","Путь к сайту",False)])
+        self._scard("Игровой сервер", "game_server", [("name","Название",False),("host","Хост",False),("user","Логин",False),("password","Пароль",True),("remote_dir","Путь к серверу",False), ("screen_name", "Имя Screen", False)])
+        self._scard("Настройки бекапа", "backups", [("excluded_folders", "Исключения (через запятую)", False), ("7z_args", "Аргументы 7z", False)])
+        
+        # Local path
+        self.dir_picker = ft.FilePicker(on_result=self._on_local_dir_picked)
+        self.ctx.page.overlay.append(self.dir_picker)
+        var = ft.TextField(value=self.ctx.config_manager.get("paths", "local_mods_dir") or "mods", expand=True, bgcolor=C["bg"], border_color=ft.colors.TRANSPARENT, color=C["text"])
+        self._sv[("paths", "local_mods_dir")] = var
+        self.content.controls.append(
+            ft.Container(
+                bgcolor=C["section"], border_radius=12, padding=15,
+                content=ft.Column([
+                    ft.Text("Локальные файлы", size=18, color=C["text"], weight="bold"),
+                    ft.Row([
+                        ft.Text("Папка модов:", width=180, color=C["text_dim"]),
+                        var,
+                        ft.ElevatedButton("Обзор", icon=ft.icons.FOLDER, on_click=lambda e: self.dir_picker.get_directory_path("Выберите папку"))
+                    ])
+                ])
+            )
+        )
+        
+        self.btn_reset = ft.ElevatedButton("Сбросить настройки", bgcolor=C["red"], color=ft.colors.WHITE, on_click=self._start_reset_timer)
+        self.content.controls.append(ft.Row([
+            ft.ElevatedButton("Сохранить", bgcolor=C["accent"], color=ft.colors.WHITE, on_click=self._save_settings),
+            self.btn_reset
+        ], spacing=10))
 
-        header = ctk.CTkFrame(scroll, fg_color="transparent")
-        header.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(header, text="Настройки", font=self.FONT_XL, text_color=C["text"]).pack(anchor="w")
-
-        self._scard(scroll, "Клиент-сервер", "client_server", [("name","Название",False),("host","Хост",False),("user","Логин",False),("password","Пароль",True),("remote_dir","Путь к сайту",False)])
-        self._scard(scroll, "Игровой сервер", "game_server", [("name","Название",False),("host","Хост",False),("user","Логин",False),("password","Пароль",True),("remote_dir","Путь к серверу",False), ("screen_name", "Имя Screen", False)])
-
-        self._scard(scroll, "Настройки бекапа", "backups", [("excluded_folders", "Исключения (через запятую)", False), ("7z_args", "Аргументы 7z", False)])
-
-        lc = ctk.CTkFrame(scroll, fg_color=C["section"], corner_radius=12)
-        lc.pack(fill="x", pady=10)
-        ctk.CTkLabel(lc, text="Локальные файлы", font=self.FONT_L, text_color=C["text"]).pack(anchor="w", padx=20, pady=(20, 10))
-        r = ctk.CTkFrame(lc, fg_color="transparent")
-        r.pack(fill="x", padx=20, pady=(0, 20))
-        ctk.CTkLabel(r, text="Папка модов:", width=180, anchor="w", text_color=C["text_dim"], font=self.FONT).pack(side="left")
-        v = ctk.StringVar(value=self.config_manager.get("paths","local_mods_dir") or "mods")
-        self._sv[("paths","local_mods_dir")] = v
-        ctk.CTkEntry(r, textvariable=v, fg_color=C["bg"], border_width=0, font=self.FONT, height=36, corner_radius=8, text_color=C["text"]).pack(side="left", fill="x", expand=True)
-
-        btns = ctk.CTkFrame(scroll, fg_color="transparent")
-        btns.pack(pady=(20, 20))
-        ctk.CTkButton(btns, text="Сохранить", height=40, width=150, corner_radius=20, font=self.FONT_B, fg_color=C["accent"], hover_color=C["accent_h"], command=self._save_settings).pack(side="left", padx=10)
-        self.btn_reset = ctk.CTkButton(btns, text="Сбросить настройки", height=40, width=150, corner_radius=20, font=self.FONT_B, fg_color=C["red"], hover_color=C["red_h"], command=self._start_reset_timer)
-        self.btn_reset.pack(side="left", padx=10)
-        self._reset_timer = None
+        self._reset_timer = False
         self._reset_count = 0
 
-    def _start_reset_timer(self):
-        """
-        [RU] Функция _start_reset_timer.
-        [EN] Function _start_reset_timer.
-        """
+    def _on_local_dir_picked(self, e: ft.FilePickerResultEvent):
+        if e.path:
+            self._sv[("paths", "local_mods_dir")].value = e.path
+            self._sv[("paths", "local_mods_dir")].update()
+
+    def _scard(self, title, section, fields):
+        rows = [ft.Text(title, size=18, color=C["text"], weight="bold")]
+        for key, label, pw in fields:
+            var = ft.TextField(value=self.ctx.config_manager.get(section, key) or "", password=pw, can_reveal_password=pw, expand=True, bgcolor=C["bg"], border_color=ft.colors.TRANSPARENT, color=C["text"])
+            self._sv[(section, key)] = var
+            rows.append(ft.Row([ft.Text(label, width=180, color=C["text_dim"]), var]))
+            
+        self.content.controls.append(ft.Container(bgcolor=C["section"], border_radius=12, padding=15, content=ft.Column(rows)))
+
+    def _save_settings(self, e):
+        for (s, k), v in self._sv.items(): 
+            self.ctx.config_manager.set(s, k, v.value)
+        self.ctx.logger.log("Настройки успешно сохранены и применены.")
+        if self.ctx.app:
+            if hasattr(self.ctx.app.console_tab, '_stream_running') and self.ctx.app.console_tab._stream_running:
+                self.ctx.app.console_tab._stream_running = False
+                threading.Thread(target=lambda: (time.sleep(0.5), self.ctx.app.console_tab._start_live_stream()), daemon=True).start()
+            if self.ctx.app.sync_tab:
+                threading.Thread(target=self.ctx.app.sync_tab.scan_mods, daemon=True).start()
+
+    def _start_reset_timer(self, e):
         if self._reset_timer:
-            self.after_cancel(self._reset_timer)
-            self._reset_timer = None
-            self.btn_reset.configure(text="Сбросить настройки", fg_color=C["red"], hover_color=C["red_h"])
+            self._reset_timer = False
+            self.btn_reset.text = "Сбросить настройки"
+            self.btn_reset.bgcolor = C["red"]
+            self.ctx.page.update()
             return
             
         self._reset_count = 10
-        self.btn_reset.configure(fg_color=C["orange"], hover_color="#FF7B1A")
-        self._tick_reset()
+        self.btn_reset.bgcolor = C["orange"]
+        self._reset_timer = True
+        threading.Thread(target=self._tick_reset, daemon=True).start()
         
     def _tick_reset(self):
-        """
-        [RU] Функция _tick_reset.
-        [EN] Function _tick_reset.
-        """
-        if self._reset_count <= 0:
-            self._do_reset()
-            return
+        while self._reset_timer and self._reset_count > 0:
+            self.btn_reset.text = f"Отменить сброс ({self._reset_count})"
+            try: self.ctx.page.update()
+            except: pass
+            time.sleep(1)
+            self._reset_count -= 1
             
-        self.btn_reset.configure(text=f"Отменить сброс ({self._reset_count})")
-        self._reset_count -= 1
-        self._reset_timer = self.after(1000, self._tick_reset)
-        
+        if self._reset_timer and self._reset_count <= 0:
+            self._do_reset()
+
     def _do_reset(self):
-        """
-        [RU] Функция _do_reset.
-        [EN] Function _do_reset.
-        """
-        self._reset_timer = None
-        self.btn_reset.configure(text="Сбросить настройки", fg_color=C["red"], hover_color=C["red_h"])
-        import shutil
+        self._reset_timer = False
+        self.btn_reset.text = "Сбросить настройки"
+        self.btn_reset.bgcolor = C["red"]
         cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin_settings.json")
         if os.path.exists(cfg): os.remove(cfg)
+        self.ctx.config_manager = ConfigManager()
+        self.ctx.logger.log("Настройки полностью сброшены!")
+        
+        dlg = ft.AlertDialog(title=ft.Text("Сброс"), content=ft.Text("Настройки сброшены! Программа закроется."),
+                             actions=[ft.TextButton("ОК", on_click=lambda e: self.ctx.page.window_destroy())])
+        self.ctx.page.overlay.append(dlg)
+        dlg.open = True
+        try: self.ctx.page.update()
+        except: pass
+
+class AppContext:
+    def __init__(self, page: ft.Page):
+        self.page = page
         self.config_manager = ConfigManager()
-        self.log_message("Настройки полностью сброшены!")
-        self.after(0, lambda: messagebox.showinfo("Сброс", "Настройки сброшены! Программа закроется."))
-        self.after(500, self.destroy)
+        self.manifest_manager = ManifestManager(self.config_manager)
+        self.sync_manager = SyncManager(self.config_manager)
+        self.logger = Logger()
+        self.app = None
 
-    def _scard(self, parent, title, section, fields):
-        """
-        [RU] Функция _scard.
-        [EN] Function _scard.
-        """
-        card = ctk.CTkFrame(parent, fg_color=C["section"], corner_radius=12)
-        card.pack(fill="x", pady=10)
-        ctk.CTkLabel(card, text=title, font=self.FONT_L, text_color=C["text"]).pack(anchor="w", padx=20, pady=(20, 10))
-        for key, label, pw in fields:
-            r = ctk.CTkFrame(card, fg_color="transparent")
-            r.pack(fill="x", padx=20, pady=5)
-            ctk.CTkLabel(r, text=label, width=180, anchor="w", text_color=C["text_dim"], font=self.FONT).pack(side="left")
-            var = ctk.StringVar(value=self.config_manager.get(section, key) or "")
-            self._sv[(section, key)] = var
-            ctk.CTkEntry(r, textvariable=var, show="•" if pw else "", fg_color=C["bg"], border_width=0, font=self.FONT, height=36, corner_radius=8, text_color=C["text"]).pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(card, text="", height=10).pack()
+class AdminPanelFlet:
+    def __init__(self, page: ft.Page):
+        self.page = page
+        self.ctx = AppContext(page)
+        self.ctx.app = self
 
-    def _save_settings(self):
-        """
-        [RU] Функция _save_settings.
-        [EN] Function _save_settings.
-        """
-        for (s, k), v in self._sv.items(): self.config_manager.set(s, k, v.get())
-        self.log_message("Настройки успешно сохранены и применены.")
-        if getattr(self, "_stream_running", False):
-            self._stream_running = False
-            self.after(500, self._start_live_stream)
-        self.scan_mods()
+        self.sync_tab = SyncTab(self.ctx)
+        self.console_tab = ConsoleTab(self.ctx)
+        self.backups_tab = BackupsTab(self.ctx)
+        self.settings_tab = SettingsTab(self.ctx)
+        
+        self.sync_tab.visible = True
+        self.console_tab.visible = False
+        self.backups_tab.visible = False
+        self.settings_tab.visible = False
+
+        self.main_content = ft.Column([
+            self.sync_tab,
+            self.console_tab,
+            self.backups_tab,
+            self.settings_tab
+        ], expand=True)
+
+        rail = ft.NavigationRail(
+            selected_index=0,
+            label_type=ft.NavigationRailLabelType.SELECTED,
+            bgcolor=C["bg2"],
+            destinations=[
+                ft.NavigationRailDestination(icon=ft.icons.SYNC, selected_icon=ft.icons.SYNC_OUTLINED, label="Моды"),
+                ft.NavigationRailDestination(icon=ft.icons.TERMINAL, selected_icon=ft.icons.TERMINAL_OUTLINED, label="Консоль"),
+                ft.NavigationRailDestination(icon=ft.icons.SAVE, selected_icon=ft.icons.SAVE_OUTLINED, label="Бекапы"),
+                ft.NavigationRailDestination(icon=ft.icons.SETTINGS, selected_icon=ft.icons.SETTINGS_OUTLINED, label="Настройки"),
+            ],
+            on_change=self.rail_change,
+        )
+
+        page.add(
+            ft.Row([
+                rail,
+                ft.VerticalDivider(width=1),
+                ft.Column([
+                    self.main_content,
+                    self.ctx.logger
+                ], expand=True)
+            ], expand=True)
+        )
+        
+        threading.Thread(target=lambda: check_for_updates(None), daemon=True).start()
+
+    def rail_change(self, e):
+        idx = e.control.selected_index
+        tabs = [self.sync_tab, self.console_tab, self.backups_tab, self.settings_tab]
+        for i, tab in enumerate(tabs):
+            tab.visible = (i == idx)
+        self.main_content.update()
+
+def main(page: ft.Page):
+    page.title = "Minecraft Admin Panel"
+    page.window_icon = "icon.png"
+    page.window_width = 1300
+    page.window_height = 800
+    page.window_min_width = 1000
+    page.window_min_height = 650
+    page.bgcolor = C["bg"]
+    page.theme_mode = ft.ThemeMode.DARK
+    
+    app = AdminPanelFlet(page)
 
 if __name__ == "__main__":
-    app = AdminPanel()
-    app.mainloop()
+    ft.app(target=main, assets_dir=".")
