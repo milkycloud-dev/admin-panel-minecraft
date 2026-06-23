@@ -1045,7 +1045,7 @@ class AdminPanelFlet:
             ], expand=True)
         )
         
-        threading.Thread(target=lambda: check_for_updates(None), daemon=True).start()
+        check_for_updates(page)
 
     def rail_change(self, e):
         idx = e.control.selected_index
