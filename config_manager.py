@@ -66,7 +66,7 @@ class ConfigManager:
                 "host": "",
                 "user": "root",
                 "password": "",
-                "remote_dir": "/var/www/download.inflexus.world"
+                "remote_dir": "/var/www/download.example.com"
             },
             "game_server": {
                 "name": "Игровой сервер",

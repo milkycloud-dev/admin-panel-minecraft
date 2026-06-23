@@ -91,7 +91,7 @@ class ManifestManager:
             # [RU] Получаем относительный путь к файлу / [EN] Get relative file path
             rel_path = os.path.relpath(local_path, mods_dir).replace('\\', '/')
             # [RU] Формируем URL-адрес файла на сервере / [EN] Construct file URL on server
-            url = f"https://download.inflexus.world/mods/{rel_path}"
+            url = f"https://download.example.com/mods/{rel_path}"
             
             # [RU] Вычисляем хэш и размер / [EN] Compute hash and size
             f_hash, f_size = self.compute_hash(local_path)
