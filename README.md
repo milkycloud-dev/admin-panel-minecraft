@@ -1,70 +1,38 @@
-# NoteBuns Admin Panel v2.0.0
+<div align="center">
+  <img src="logo.png" alt="Minecraft Admin Panel Logo" width="200" style="border-radius: 20px; box-shadow: 0px 4px 10px rgba(0,0,0,0.5);"/>
+  
+  # Minecraft Admin Panel
+  **Современная утилита для администрирования серверов Minecraft**
+  
+  [![Release](https://img.shields.io/github/v/release/milkycloud-dev/admin-panel-minecraft?style=for-the-badge&color=0078D4)](https://github.com/milkycloud-dev/admin-panel-minecraft/releases)
+  [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-brightgreen?style=for-the-badge)](https://github.com/milkycloud-dev/admin-panel-minecraft/releases)
+  [![UI](https://img.shields.io/badge/UI-Flet_Framework-blue?style=for-the-badge)](https://flet.dev)
+</div>
 
-## Overview
+---
 
-The NoteBuns Admin Panel is a proprietary, standalone graphical user interface (GUI) application designed for the centralized management of remote game servers and associated web resources via the SSH protocol. Version 2.0.0 introduces a complete UI overhaul using the **Flet** framework, providing a much smoother, reactive, and modern experience.
+**Minecraft Admin Panel** — это мощная и красивая десктопная утилита для автоматизации задач администратора сервера Minecraft. Написана на Python с использованием современного фреймворка **Flet** (основанного на Flutter), обеспечивающего невероятно плавный, быстрый и отзывчивый интерфейс.
 
-## Key Capabilities
+## 🚀 Особенности
+- **Интеграция с серверами:** Автоматическое подключение по SFTP и синхронизация модов (удаление старых, загрузка новых) в один клик.
+- **RCON Консоль:** Прямое управление сервером через красивую RCON-консоль. Поддержка истории команд, быстрого ввода и подсветки синтаксиса логов.
+- **Модуль Бекапов:** Создание локальных архивов (через 7-Zip) с возможностью исключения ненужных папок (например, `world` или `logs`).
+- **Сверхкомпактная сборка:** Готовые бинарные файлы (EXE для Windows и бинарник для Linux) максимально сжаты с помощью UPX для экономии места.
+- **Современный UI:** Темная тема (Dark Mode), неоновые акценты, скругленные углы и плавная анимация переходов.
+- **Встроенный автообновлятор:** Приложение само проверяет новые версии на GitHub и предлагает обновиться без перезахода на сайт.
 
-* **Modification Synchronization Framework**: A robust system for comparing local modification files (.jar) against remote counterparts, enabling automated, differential synchronization across multiple nodes. Version 2.0.0 introduces a unified, synchronized scrolling view for both servers, making comparisons effortless.
-* **Integrated Remote Console**: Secure shell (SSH) integration allows direct connection to active server processes (e.g., `screen` sessions). Administrators can monitor live output and issue commands in real-time, now with full interactive terminal support and ANSI filtering.
-* **Automated Backup Operations**: Facilitates the creation of highly compressed archives (7z format) of the server directory, featuring a configurable exclusion list and contextual management (deletion/downloading) from the GUI.
-* **Self-Updating Architecture**: The application incorporates an automated update mechanism that interfaces directly with the official GitHub release pipeline, ensuring the software remains current.
-* **Secure Configuration Management**: All authentication credentials and operational parameters are stored securely within a local configuration file (`admin_settings.json`).
+## 📥 Установка и запуск
 
-## Deployment Guidelines
+Перейдите на страницу [Releases](https://github.com/milkycloud-dev/admin-panel-minecraft/releases) и скачайте последнюю версию для вашей операционной системы. 
+Программа поставляется в виде одного переносимого файла (Portable), установка не требуется!
 
-1. **Acquisition**: Download the latest compiled binary (`AdminPanel.exe` for Windows, `AdminPanel` for Linux) from the official Releases page.
-2. **Initialization**: Execute the binary. During the initial launch, the system will prompt the user to initialize a blank configuration matrix or import an existing JSON configuration file.
-3. **Configuration**: Navigate to the Settings tab to input the requisite SSH credentials and directory paths for the remote host environments.
-4. **Application**: Restart the application instance to validate and apply the newly configured parameters.
+## ⚙️ Технологии
+- **Python 3.11+**
+- **Flet** (Современный UI Framework)
+- **Paramiko** (SFTP/SSH интеграция)
+- **PyInstaller & UPX** (Сборка и сжатие релизов)
 
-### Configuration Specification (`admin_settings.json`)
-
-The application leverages a JSON-formatted configuration file generated in the working directory. A typical configuration structure is outlined below:
-
-```json
-{
-    "client_server": {
-        "name": "Web Server (Mods)",
-        "host": "YOUR_IP",
-        "user": "root",
-        "password": "YOUR_PASSWORD",
-        "remote_dir": "/var/www/mods"
-    },
-    "game_server": {
-        "name": "Minecraft Server",
-        "host": "YOUR_IP",
-        "user": "root",
-        "password": "YOUR_PASSWORD",
-        "remote_dir": "/root/minecraft",
-        "screen_name": "minecraft_screen_session_name"
-    },
-    "backups": {
-        "excluded_folders": "bluemap, dynmap, coreprotect, logs, crash-reports, cache, backups",
-        "7z_args": "-mx9 -mmt4"
-    }
-}
-```
-
-## Build Instructions
-
-For internal compilation and deployment, the following procedure is required:
-
-1. Clone the proprietary repository:
-   ```bash
-   git clone https://github.com/milkycloud-dev/admin-panel-minecraft.git
-   cd admin-panel-minecraft
-   ```
-2. Provision the Python environment with required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Execute the PyInstaller build sequence:
-   ```bash
-   python -m PyInstaller --onefile --noconfirm --windowed --icon "icon.png" --add-data "fonts;fonts" --add-data "icon.png;." -n AdminPanel main.py
-   ```
-
-## Licensing Information
-
-This software is distributed under a strictly proprietary license. Commercial use, reproduction, modification, and unauthorized distribution are strictly prohibited. Refer to the `LICENSE` file for detailed terms and conditions. Copyright (c) MilkyCloud. All Rights Reserved.
+---
+<div align="center">
+  <i>Разработано с ❤️ для администраторов серверов Minecraft.</i>
+</div>

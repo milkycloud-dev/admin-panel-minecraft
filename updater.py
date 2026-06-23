@@ -6,7 +6,7 @@ import subprocess
 import threading
 import flet as ft
 
-CURRENT_VERSION = "2.0.0"
+CURRENT_VERSION = "2.0.1"
 REPO_API = "https://api.github.com/repos/milkycloud-dev/admin-panel-minecraft/releases/latest"
 
 def check_for_updates(page: ft.Page):

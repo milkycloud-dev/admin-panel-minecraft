@@ -897,8 +897,9 @@ class SettingsTab(ft.Container):
         self._scard("Настройки бекапа", "backups", [("excluded_folders", "Исключения (через запятую)", False), ("7z_args", "Аргументы 7z", False)])
         
         # Local path
-        self.dir_picker = ft.FilePicker(on_result=self._on_local_dir_picked)
-        self.ctx.page.overlay.append(self.dir_picker)
+        self.file_picker = ft.FilePicker()
+        self.file_picker.on_result = self._on_local_file_picked
+        self.ctx.page.overlay.append(self.file_picker)
         var = ft.TextField(value=self.ctx.config_manager.get("paths", "local_mods_dir") or "mods", expand=True, bgcolor=C["bg"], border_color=ft.colors.TRANSPARENT, color=C["text"])
         self._sv[("paths", "local_mods_dir")] = var
         self.content.controls.append(
