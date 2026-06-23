@@ -1066,5 +1066,9 @@ def main(page: ft.Page):
     
     app = AdminPanelFlet(page)
 
+import sys
+import os
+
 if __name__ == "__main__":
-    ft.app(target=main, assets_dir=".")
+    assets_dir = sys._MEIPASS if getattr(sys, 'frozen', False) else "."
+    ft.app(target=main, assets_dir=assets_dir)
