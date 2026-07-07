@@ -113,6 +113,36 @@ def test_compute_mod_entries_skips_non_jar():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_rebuild_creates_missing_index_file():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        mods = tmp / "mods"
+        mods.mkdir(parents=True)
+        (mods / "new.jar").write_bytes(b"new-mod")
+        index_path = tmp / "client" / "index.json"
+        assert not index_path.exists()
+        out = rebuild_index_file(str(index_path), str(mods))
+        assert index_path.is_file()
+        assert count_mod_entries(out) == 1
+        loaded = json.loads(index_path.read_text(encoding="utf-8"))
+        assert isinstance(loaded.get("archives"), dict)
+        assert isinstance(loaded.get("files"), dict)
+        assert loaded["files"]["mods/new.jar"]["hash"].startswith("b3:")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_index_returns_template_when_missing():
+    from index_manifest_builder import default_index, load_index
+
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        missing = str(Path(tmp) / "no-index.json")
+        assert load_index(missing) == default_index()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     tests = [
         test_rebuild_preserves_archives_and_options,
@@ -120,6 +150,8 @@ if __name__ == "__main__":
         test_format_matches_launcher_file_entry,
         test_rebuild_index_file_roundtrip,
         test_compute_mod_entries_skips_non_jar,
+        test_rebuild_creates_missing_index_file,
+        test_load_index_returns_template_when_missing,
     ]
     failed = 0
     for fn in tests:

@@ -652,6 +652,7 @@ class SyncTab(ft.Container):
             title=ft.Text("Index"),
             content=ft.Text(
                 "Пересобрать client/index.json на сервере скачивания?\n"
+                "Если файла нет — будет создан новый по встроенному шаблону лаунчера.\n"
                 "(manifest.json не трогаем — лаунчер читает моды из index.json)"
             ),
             actions=[
