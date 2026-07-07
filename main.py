@@ -20,6 +20,12 @@ except ImportError:
     import paramiko
     import blake3
 
+# Flet >=0.27 renamed icons/colors modules to Icons/Colors enums.
+if hasattr(ft, "Icons") and not hasattr(ft.icons, "BUILD"):
+    ft.icons = ft.Icons
+if hasattr(ft, "Colors") and not hasattr(ft, "colors"):
+    ft.colors = ft.Colors
+
 from config_manager import ConfigManager
 from ssh_manager import SSHManager
 from manifest_manager import ManifestManager
