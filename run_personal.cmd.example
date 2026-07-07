@@ -1,0 +1,10 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+rem Template for personal runner. Generate your copy:
+rem   python tools\build_personal_runner.py admin_settings.json run_personal.cmd
+rem run_personal.cmd is gitignored (contains secrets).
+
+set "SETTINGS_B64=PASTE_OUTPUT_OF_python_tools_embed_settings.py_HERE"
+echo ERROR: Use tools\build_personal_runner.py to generate run_personal.cmd
+exit /b 1

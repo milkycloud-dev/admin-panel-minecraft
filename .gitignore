@@ -3,6 +3,11 @@ __pycache__/
 *.json
 !news.json
 !manifest.json
+run_personal.cmd
+admin_settings.json
+test_run_err.log
+generated-*.ico
+.git.broken/
 mods/
 build/
 dist/
@@ -10,3 +15,6 @@ dist/
 .env
 logs/
 .cursor/
+_compare_index.py
+tests/.guard_patterns
+Old/

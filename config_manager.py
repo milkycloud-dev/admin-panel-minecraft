@@ -1,122 +1,152 @@
 import json
 import os
 import shutil
-import tkinter as tk
-import tkinter.messagebox as messagebox
-import tkinter.filedialog as filedialog
+import sys
+
+CONFIG_FILENAME = "admin_settings.json"
+
+DEFAULT_CONFIG = {
+    "client_server": {
+        "name": "Клиент-сервер",
+        "host": "",
+        "user": "root",
+        "password": "",
+        "remote_dir": "/var/www/download.inflexus.world",
+        "mods_subpath": "client/mods",
+    },
+    "game_server": {
+        "name": "Игровой сервер",
+        "host": "",
+        "user": "root",
+        "password": "",
+        "remote_dir": "/root/mineroot/minecraft",
+        "mods_subpath": "mods",
+        "screen_name": "minecraft",
+    },
+    "paths": {
+        "local_mods_dir": "mods",
+    },
+    "backups": {
+        "excluded_folders": "bluemap, dynmap, coreprotect, logs, crash-reports, cache, backups",
+        "7z_args": "-mx9 -mmt4",
+    },
+}
+
+
+def get_app_base_dir():
+    """Directory of the exe (frozen) or project script."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def get_config_search_dirs():
+    """Fast fixed list of folders — no recursive scan."""
+    home = os.path.expanduser("~")
+    base = get_app_base_dir()
+    candidates = [
+        os.getcwd(),
+        base,
+        home,
+        os.path.join(home, "Desktop"),
+        os.path.join(home, "Downloads"),
+        os.path.join(home, "Documents"),
+        os.path.join(home, "Desktop", "admin-panel-minecraft"),
+        os.path.join(home, "Downloads", "admin-panel-minecraft-main", "admin-panel-minecraft-main"),
+    ]
+    seen = set()
+    result = []
+    for path in candidates:
+        norm = os.path.normcase(os.path.abspath(path))
+        if norm in seen or not path:
+            continue
+        seen.add(norm)
+        result.append(path)
+    return result
+
+
+def discover_config_file():
+    """Return first valid admin_settings.json in known user folders."""
+    for folder in get_config_search_dirs():
+        if not os.path.isdir(folder):
+            continue
+        candidate = os.path.join(folder, CONFIG_FILENAME)
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if isinstance(data, dict) and data:
+                return candidate
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+    return None
+
 
 class ConfigManager:
     """
-    [RU] Управляет конфигурацией приложения (admin_settings.json).
-    Отвечает за загрузку, сохранение и инициализацию настроек.
-    
-    [EN] Manages the application's configuration (admin_settings.json).
-    Responsible for loading, saving, and initializing settings.
+    Manages admin_settings.json: auto-discovery, import/export, load/save.
     """
-    def __init__(self, config_path="admin_settings.json"):
-        """
-        [RU] Конструктор класса. Инициализирует путь к конфигурации.
-        [EN] Class constructor. Initializes the configuration path.
-        """
-        self.config_path = config_path
+
+    def __init__(self, config_path=None):
+        self.config_path = os.path.abspath(
+            config_path or os.path.join(get_app_base_dir(), CONFIG_FILENAME)
+        )
+        self.import_required = False
+        self.discovered_from = None
         self._ensure_config()
         self.config = self._load()
 
     def _ensure_config(self):
-        """
-        [RU] Проверяет наличие файла настроек при запуске. Если файл отсутствует, 
-        спрашивает пользователя: импортировать существующий или создать новый пустой.
-        
-        [EN] Ensures the config file exists on startup. If missing, 
-        prompts user to import an existing one or create a new empty one.
-        """
-        if not os.path.exists(self.config_path):
-            root = tk.Tk()
-            root.withdraw()
-            
-            answer = messagebox.askyesnocancel(
-                "Настройки не найдены / Settings not found",
-                f"Файл {self.config_path} не найден.\n\nНажмите 'Да', чтобы импортировать существующий файл.\nНажмите 'Нет', чтобы создать пустой шаблон."
-            )
-            
-            if answer is True: # [RU] Пользователь выбрал импорт / [EN] User chose to import
-                file_path = filedialog.askopenfilename(title="Выберите файл настроек (json)", filetypes=[("JSON", "*.json")])
-                if file_path:
-                    if os.path.abspath(file_path) != os.path.abspath(self.config_path):
-                        shutil.copy(file_path, self.config_path)
-                else:
-                    self._create_empty()
-            elif answer is False: # [RU] Пользователь выбрал создание пустого файла / [EN] User chose to create empty file
-                self._create_empty()
-            else: # [RU] Пользователь отменил действие, закрываем приложение / [EN] User canceled, close application
-                import sys
-                sys.exit(0)
-            
-            root.destroy()
+        if os.path.exists(self.config_path):
+            return
+
+        discovered = discover_config_file()
+        if discovered:
+            self.discovered_from = discovered
+            if os.path.normcase(discovered) != os.path.normcase(self.config_path):
+                shutil.copy2(discovered, self.config_path)
+            return
+
+        self.import_required = True
+        self._create_empty()
 
     def _create_empty(self):
-        """
-        [RU] Создает пустой шаблон настроек по умолчанию (admin_settings.json).
-        
-        [EN] Creates a default empty configuration template (admin_settings.json).
-        """
-        empty_conf = {
-            "client_server": {
-                "name": "Клиент-сервер",
-                "host": "",
-                "user": "root",
-                "password": "",
-                "remote_dir": "/var/www/download.example.com"
-            },
-            "game_server": {
-                "name": "Игровой сервер",
-                "host": "",
-                "user": "root",
-                "password": "",
-                "remote_dir": "/root/mineroot/minecraft",
-                "screen_name": "minecraft"
-            },
-            "paths": {
-                "local_mods_dir": "mods"
-            },
-            "backups": {
-                "excluded_folders": "bluemap, dynmap, coreprotect, logs, crash-reports, cache, backups",
-                "7z_args": "-mx9 -mmt4"
-            }
-        }
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(empty_conf, f, indent=4)
+        with open(self.config_path, "w", encoding="utf-8") as handle:
+            json.dump(DEFAULT_CONFIG, handle, indent=4, ensure_ascii=False)
 
     def _load(self):
-        """
-        [RU] Читает и загружает JSON файл в память.
-        [EN] Reads and loads the JSON file into memory.
-        """
-        with open(self.config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        with open(self.config_path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
 
     def save(self):
-        """
-        [RU] Сохраняет текущие изменения из памяти в JSON файл.
-        [EN] Saves current changes from memory back to the JSON file.
-        """
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(self.config, f, indent=4)
+        with open(self.config_path, "w", encoding="utf-8") as handle:
+            json.dump(self.config, handle, indent=4, ensure_ascii=False)
+
+    def reload(self):
+        self.config = self._load()
+        return self.config
+
+    def import_from(self, source_path):
+        source_path = os.path.abspath(source_path)
+        if os.path.normcase(source_path) != os.path.normcase(self.config_path):
+            shutil.copy2(source_path, self.config_path)
+        self.import_required = False
+        self.discovered_from = source_path
+        self.reload()
+
+    def export_to(self, dest_path):
+        dest_path = os.path.abspath(dest_path)
+        self.save()
+        if os.path.normcase(dest_path) != os.path.normcase(self.config_path):
+            shutil.copy2(self.config_path, dest_path)
 
     def get(self, section, key=None):
-        """
-        [RU] Возвращает значение по секции и ключу. Если ключ не указан, возвращает всю секцию.
-        [EN] Returns the value by section and key. If key is not provided, returns the whole section.
-        """
         if key is None:
             return self.config.get(section, {})
         return self.config.get(section, {}).get(key, "")
 
     def set(self, section, key, value):
-        """
-        [RU] Устанавливает новое значение для указанной секции и ключа, затем сохраняет файл.
-        [EN] Sets a new value for the specified section and key, then saves the file.
-        """
         if section not in self.config:
             self.config[section] = {}
         self.config[section][key] = value

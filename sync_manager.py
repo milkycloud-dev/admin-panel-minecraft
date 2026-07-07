@@ -16,6 +16,18 @@ class SyncManager:
         """
         self.config = config
 
+    def get_remote_mods_dir(self, host_key):
+        """
+        Resolve remote mods directory for client or game server.
+        Client download host stores jars under client/mods; game server uses mods/.
+        """
+        conf = self.config.get(host_key)
+        base = (conf.get("remote_dir") or "").rstrip("/")
+        subpath = conf.get("mods_subpath")
+        if not subpath:
+            subpath = "client/mods" if host_key == "client_server" else "mods"
+        return f"{base}/{subpath}"
+
     def get_local_mods(self):
         """
         [RU] Сканирует локальную папку модов. Возвращает только файлы с расширением .jar.
@@ -55,13 +67,14 @@ class SyncManager:
         Returns a tuple (mods_dictionary, error_message_if_any).
         """
         conf = self.config.get(host_key)
+        if not conf.get("host"):
+            return {}, ""
         ssh = SSHManager(conf["host"], conf["user"], conf["password"])
         ok, msg = ssh.connect()
         if not ok:
             return None, msg
 
-        remote_base = conf["remote_dir"]
-        remote_mods_dir = f"{remote_base}/mods"
+        remote_mods_dir = self.get_remote_mods_dir(host_key)
         
         import base64
         # [RU] Скрипт, который будет выполнен на сервере / [EN] Script to be executed on the server
@@ -86,10 +99,12 @@ if os.path.exists(d):
 """
         # [RU] Кодируем скрипт в base64 для безопасной передачи / [EN] Encode script to base64 for safe transfer
         b64 = base64.b64encode(script.encode('utf-8')).decode('utf-8')
-        cmd = f"python3 -c \"import base64,sys;exec(base64.b64decode(sys.argv[1]).decode('utf-8'))\" {b64}"
+        py_cmd = (
+            f"python3 -c \"import base64,sys;exec(base64.b64decode(sys.argv[1]).decode('utf-8'))\" {b64}"
+            f" || python -c \"import base64,sys;exec(base64.b64decode(sys.argv[1]).decode('utf-8'))\" {b64}"
+        )
         
-        # [RU] Выполняем скрипт / [EN] Execute script
-        ok, out = ssh.execute_command(cmd)
+        ok, out = ssh.execute_command(py_cmd, timeout=120)
         
         mods = {}
         if out and out.strip():

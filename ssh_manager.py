@@ -101,40 +101,33 @@ class SSHManager:
     def execute_command(self, cmd, timeout=None):
         """
         [RU] Выполняет консольную команду на удаленном сервере и собирает вывод.
-        Использует каналы paramiko для установки индивидуального таймаута на команду.
-        Возвращает кортеж (успех_булево, вывод_команды).
-        
         [EN] Executes a console command on the remote server and collects output.
-        Uses paramiko channels to set a custom timeout per command.
-        Returns a tuple (success_boolean, command_output).
         """
         if not self.ssh:
             return False, "Not connected"
         try:
-            # [RU] Получаем транспортный канал / [EN] Get transport channel
-            t = self.ssh.get_transport()
-            if not t or not t.is_active():
-                return False, "SSH Transport not active"
-            
-            # [RU] Открываем сессию и устанавливаем таймаут / [EN] Open session and set timeout
-            chan = t.open_session()
-            chan.settimeout(timeout or self.timeout)
-            chan.exec_command(cmd)
-            
-            # [RU] Читаем стандартный вывод и вывод ошибок / [EN] Read standard output and error output
-            out = chan.recv(4096).decode('utf-8', errors='ignore')
-            err = chan.recv_stderr(4096).decode('utf-8', errors='ignore')
-            
-            # [RU] Ждем завершения команды и дочитываем остатки / [EN] Wait for completion and read remaining chunks
-            while not chan.exit_status_ready():
-                if chan.recv_ready():
-                    out += chan.recv(4096).decode('utf-8', errors='ignore')
-                if chan.recv_stderr_ready():
-                    err += chan.recv_stderr(4096).decode('utf-8', errors='ignore')
-            
-            # [RU] Успешно, если код возврата 0 / [EN] Success if exit code is 0
-            success = chan.recv_exit_status() == 0
-            chan.close()
-            return success, out + ("\n" + err if err else "")
+            effective_timeout = timeout or self.timeout
+            stdin, stdout, stderr = self.ssh.exec_command(cmd, timeout=effective_timeout)
+            channel = stdout.channel
+            if effective_timeout:
+                channel.settimeout(effective_timeout)
+            out = stdout.read().decode("utf-8", errors="ignore")
+            err = stderr.read().decode("utf-8", errors="ignore")
+            exit_code = channel.recv_exit_status()
+            combined = out + (f"\n{err}" if err.strip() else "")
+            return exit_code == 0, combined
+        except Exception as e:
+            return False, str(e)
+
+    def download_file(self, remote_path, local_path):
+        """Download remote file via SFTP. Returns (success, message)."""
+        if not self.sftp:
+            return False, "SFTP not initialized"
+        try:
+            local_dir = os.path.dirname(os.path.abspath(local_path))
+            if local_dir and not os.path.exists(local_dir):
+                os.makedirs(local_dir, exist_ok=True)
+            self.sftp.get(remote_path, local_path)
+            return True, f"Downloaded {remote_path}"
         except Exception as e:
             return False, str(e)

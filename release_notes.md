@@ -1,8 +1,17 @@
-# Release 2.1.0
+# Release 2.0.0
 
-### Changes (since 2.0.0)
-* **Flet compatibility fix:** Added backward-compatible shim for `ft.icons` / `ft.colors` on Flet 0.27+ (fixes `module 'flet.controls.material.icons' has no attribute 'BUILD'` crash on startup).
-* **Stability:** Application now runs on both legacy Flet (0.22.x) and current Flet (0.85.x) without code changes.
+### Features
+* Mod sync between client download host and game server with status comparison
+* SSH console, server start/stop/restart via screen
+* Remote backups with progress monitoring
+* Config auto-discovery (Desktop, Downloads, app folder)
+* Import/export settings, first-run import dialog
+* Flet 0.85+ compatibility (Button, PopupMenuItem, padding, FilePicker services API)
+* Thread-safe system log and UI updates
+* Index builder: rebuilds `client/index.json` (launcher mod list), not `manifest.json`
+* Obsolete `manifest_manager.py` moved to `Old/` (launcher uses index via `index_urls`)
+* `run.cmd` — zero-install launcher with fresh clone each run (settings preserved)
+* `run_personal.cmd.example` — personal launcher template with embedded settings
 
 ### Upgrade
-Download the latest `AdminPanel-Windows.exe` or `AdminPanel-Linux` asset from this release, or use the in-app update checker.
+Download `AdminPanel-Windows.exe` or `AdminPanel-Linux` from this release.

@@ -7,6 +7,12 @@ on:
 permissions:
   contents: write
 
+env:
+  GIT_AUTHOR_NAME: milkycloud-dev
+  GIT_AUTHOR_EMAIL: uberlion1@gmail.com
+  GIT_COMMITTER_NAME: milkycloud-dev
+  GIT_COMMITTER_EMAIL: uberlion1@gmail.com
+
 jobs:
   build:
     name: Build on ${{ matrix.os }}
