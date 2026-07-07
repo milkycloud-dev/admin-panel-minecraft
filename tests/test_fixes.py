@@ -1,6 +1,4 @@
 """Automated tests for bugfixes and sync paths."""
-import base64
-import json
 import re
 import subprocess
 import sys
@@ -11,7 +9,6 @@ sys.path.insert(0, str(ROOT))
 
 # Git-tracked files allowed to contain author emails (not server credentials).
 _EMAIL_ALLOWLIST = {
-    ".mailmap",
     ".github/workflows/release.yml",
 }
 
@@ -55,18 +52,12 @@ def test_schedule_ui_in_main():
     assert hasattr(main, "schedule_ui")
 
 
-def test_personal_runner_template():
-    example = (ROOT / "run_personal.cmd.example").read_text(encoding="utf-8")
-    assert "PASTE_OUTPUT" in example
-    personal = ROOT / "run_personal.cmd"
-    if personal.exists():
-        text = personal.read_text(encoding="utf-8")
-        assert "SETTINGS_B64=" in text
-        import re
-        m = re.search(r"SETTINGS_B64=(\S+)", text)
-        assert m
-        data = json.loads(base64.b64decode(m.group(1)))
-        assert data.get("client_server", {}).get("host")
+def test_build_personal_runner_script():
+    script = ROOT / "tools" / "build_personal_runner.py"
+    assert script.is_file()
+    text = script.read_text(encoding="utf-8")
+    assert "SETTINGS_B64" in text
+    assert "admin_settings.json" in text
 
 
 def _git_tracked_files() -> list[str]:
@@ -101,7 +92,7 @@ if __name__ == "__main__":
         test_game_mods_dir,
         test_updater_version,
         test_schedule_ui_in_main,
-        test_personal_runner_template,
+        test_build_personal_runner_script,
         test_no_secrets_in_tracked_sources,
     ]
     failed = 0

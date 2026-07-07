@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.png" alt="Minecraft Admin Panel Logo" width="200" style="border-radius: 20px; box-shadow: 0px 4px 10px rgba(0,0,0,0.5);"/>
+  <img src="icon.png" alt="Minecraft Admin Panel" width="128"/>
   
   # Minecraft Admin Panel
   **Профессиональное решение для администрирования серверов Minecraft**
@@ -49,7 +49,7 @@ pip install -r requirements.txt
 
 3. Выполните сборку с использованием `flet pack`. Для оптимизации размера рекомендуется исключить неиспользуемые модули:
 ```bash
-flet pack main.py --name AdminPanel-Windows --icon "icon.png" --add-data "fonts;fonts" --add-data "icon.png;." -y --exclude-module numpy --exclude-module pandas --exclude-module PIL --exclude-module tkinter
+flet pack main.py --name AdminPanel-Windows --icon "icon.png" --add-data "icon.png;." -y --exclude-module numpy --exclude-module pandas --exclude-module PIL --exclude-module tkinter
 ```
 После завершения процесса компиляции готовый бинарный файл будет доступен в директории `dist`.
 

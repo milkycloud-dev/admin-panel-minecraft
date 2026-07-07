@@ -8,10 +8,8 @@
 * Import/export settings, first-run import dialog
 * Flet 0.85+ compatibility (Button, PopupMenuItem, padding, FilePicker services API)
 * Thread-safe system log and UI updates
-* Index builder: rebuilds `client/index.json` (launcher mod list), not `manifest.json`
-* Obsolete `manifest_manager.py` moved to `Old/` (launcher uses index via `index_urls`)
-* `run.cmd` — zero-install launcher with fresh clone each run (settings preserved)
-* `run_personal.cmd.example` — personal launcher template with embedded settings
+* Index builder: rebuilds `client/index.json` (launcher mod list)
+* `run.cmd` — zero-install launcher; `tools/build_personal_runner.py` for personal copy
 
 ### Upgrade
 Download `AdminPanel-Windows.exe` or `AdminPanel-Linux` from this release.
