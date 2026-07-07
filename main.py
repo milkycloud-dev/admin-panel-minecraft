@@ -650,10 +650,20 @@ class SyncTab(ft.Container):
 
         dlg = ft.AlertDialog(
             title=ft.Text("Index"),
-            content=ft.Text(
-                "Пересобрать client/index.json на сервере скачивания?\n"
-                "Если файла нет — будет создан новый по встроенному шаблону лаунчера.\n"
-                "(manifest.json не трогаем — лаунчер читает моды из index.json)"
+            content=ft.Column(
+                [
+                    ft.Text("Пересобрать client/index.json на сервере скачивания?"),
+                    ft.Text(
+                        "ВНИМАНИЕ! Список модов в index.json будет полностью пересобран "
+                        "по содержимому client/mods. Лишние jar на сервере попадут в лаунчер, "
+                        "отсутствующие — исчезнут из списка. Проверьте папку модов перед подтверждением!",
+                        color=C["red"],
+                        weight=ft.FontWeight.BOLD,
+                        size=14,
+                    ),
+                ],
+                tight=True,
+                spacing=12,
             ),
             actions=[
                 ft.TextButton("Да", on_click=_confirmed),
