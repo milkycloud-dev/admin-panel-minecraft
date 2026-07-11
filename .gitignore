@@ -7,6 +7,11 @@ __pycache__/
 !package.json
 run_personal.cmd
 admin_settings.json
+keys/
+*.key
+private_ed25519*
+manifest_sym*
+manifest_key*
 test_run_err.log
 generated-*.ico
 .git.broken/
