@@ -19,13 +19,13 @@ class SyncManager:
     def get_remote_mods_dir(self, host_key):
         """
         Resolve remote mods directory for client or game server.
-        Client download host stores jars under client/mods; game server uses mods/.
+        V2.1: client download host stores jars under cloud/mods; game server uses mods/.
         """
         conf = self.config.get(host_key)
         base = (conf.get("remote_dir") or "").rstrip("/")
         subpath = conf.get("mods_subpath")
         if not subpath:
-            subpath = "client/mods" if host_key == "client_server" else "mods"
+            subpath = "cloud/mods" if host_key == "client_server" else "mods"
         return f"{base}/{subpath}"
 
     def get_local_mods(self):

@@ -23,6 +23,45 @@
 - **Optimized Build:** Binary files for Windows and Linux environments undergo extreme compression using the UPX algorithm, ensuring high portability and minimal executable size.
 - **Update Delivery System:** An integrated automatic version verification module provides seamless application updates directly from the GitHub repository.
 
+## Encrypted Launcher Manifest (V2.1)
+
+Since launcher V2.1 the panel builds a SINGLE encrypted manifest at `/cloud/manifest.json`
+(AES-256-GCM encryption + Ed25519 signature) instead of the plaintext `client/index.json`.
+The "Собрать Manifest" button rebuilds the mod list on the server, then encrypts and signs
+the manifest LOCALLY (the private key never leaves your machine) and uploads the envelope.
+
+Where to provide the keys: **Settings -> Ключи manifest (V2.1)** — specify paths to two
+local files with base64 keys:
+
+- symmetric AES-256 key file (`manifest_sym.key`);
+- private Ed25519 signing key file (`ed25519_private.key`).
+
+Key VALUES are never stored in this repository or in CI. Generate a key set with:
+
+```bash
+python manifest_crypto.py gen
+```
+
+Local dry-run (without uploading):
+
+```bash
+python manifest_builder.py --index path/to/index.json --metadata cloud_manifest_metadata.json --out /tmp/manifest.json --sym-key-file /path/manifest_sym.key --priv-key-file /path/ed25519_private.key
+```
+
+## GitHub → fallback server mirror
+
+GitHub is the source of truth; `download.inflexus.world` is the fallback when GitHub is
+blocked. On startup the panel checks, and the **Синхр. GH→сервер** button syncs:
+
+- Raw repo files: `settings.json`, `news.json`, `cloud/manifest.json`
+  (server bridge `manifest.json` / `new/manifest.json` stay server-managed with
+  `/cloud/exe-mirror` update URLs);
+- Latest release assets: `NoteBuns-Portable-*.exe` and `NoteBuns_*.AppImage` →
+  `/cloud/exe-mirror`.
+
+Game payloads (mods / java / archives) already live under `/cloud/` on the server and are
+not mirrored from GitHub (they are not in the public repo).
+
 ## Deployment and Configuration
 
 The application is distributed as a compiled executable file and requires no installation. All configuration data is stored locally in the `admin_settings.json` file, which is generated automatically upon the first launch.

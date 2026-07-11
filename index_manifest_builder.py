@@ -37,7 +37,9 @@ def load_index(index_path: str) -> dict:
     """
     if not os.path.isfile(index_path):
         return default_index()
-    with open(index_path, "r", encoding="utf-8") as handle:
+    # utf-8-sig корректно читает файлы и с BOM, и без него.
+    # utf-8-sig correctly reads files both with and without a BOM.
+    with open(index_path, "r", encoding="utf-8-sig") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):
         return default_index()

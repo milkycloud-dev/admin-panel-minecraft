@@ -3,6 +3,8 @@ __pycache__/
 *.json
 !news.json
 !manifest.json
+!cloud_manifest_metadata.json
+!package.json
 run_personal.cmd
 admin_settings.json
 test_run_err.log

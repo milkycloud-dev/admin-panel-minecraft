@@ -2,3 +2,4 @@ flet
 paramiko
 blake3
 Pillow
+cryptography

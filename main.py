@@ -15,11 +15,13 @@ try:
     import flet as ft
     import paramiko
     import blake3
+    import cryptography  # noqa: F401  (нужна для шифрования manifest / needed for manifest encryption)
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "paramiko", "blake3", "flet", "Pillow"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "paramiko", "blake3", "flet", "Pillow", "cryptography"])
     import flet as ft
     import paramiko
     import blake3
+    import cryptography  # noqa: F401
 
 # Flet >=0.27 renamed icons/colors modules to Icons/Colors enums.
 if hasattr(ft, "Icons") and not hasattr(ft.icons, "BUILD"):
@@ -206,6 +208,12 @@ from config_manager import ConfigManager
 from ssh_manager import SSHManager
 from index_manifest_builder import remote_rebuild_script
 from sync_manager import SyncManager
+from manifest_builder import (
+    CLOUD_BASE_URL,
+    build_from_existing_index,
+    seal_and_write,
+)
+from github_mirror import check_all, check_mirror, sync_all, sync_mirror
 from updater import check_for_updates
 
 # Colors
@@ -291,11 +299,16 @@ class SyncTab(ft.Container):
         cs_conf = self.ctx.config_manager.get("client_server")
         gs_conf = self.ctx.config_manager.get("game_server")
 
+        # Статус зеркала GitHub -> fallback (контент + exe). Проверяется при старте и по кнопке.
+        self.mirror_status = ft.Text("Зеркало GH→сервер: проверка...", size=12, color=C["text_dim"])
+
         self.content = ft.Column([
             ft.Row([
                 ft.Text("Управление Модами", size=24, color=C["text"], weight="bold"),
                 ft.Container(expand=True),
-                ft.ElevatedButton("Собрать Index", icon=ft.icons.BUILD, bgcolor=C["orange"], color=ft.colors.WHITE, on_click=lambda e: self.rebuild_index_only(), style=ft.ButtonStyle(padding=10)),
+                self.mirror_status,
+                ft.ElevatedButton("Синхр. GH→сервер", icon=ft.icons.CLOUD_SYNC, bgcolor=C["accent"], color=ft.colors.WHITE, on_click=lambda e: self.sync_github_fallback(), style=ft.ButtonStyle(padding=10)),
+                ft.ElevatedButton("Собрать Manifest", icon=ft.icons.BUILD, bgcolor=C["orange"], color=ft.colors.WHITE, on_click=lambda e: self.rebuild_cloud_manifest(), style=ft.ButtonStyle(padding=10)),
                 ft.ElevatedButton("Пересканировать", bgcolor=C["accent"], color=ft.colors.WHITE, on_click=lambda e: self.scan_mods())
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             ft.Container(
@@ -603,17 +616,46 @@ class SyncTab(ft.Container):
                 self.ctx.logger.log(f"Скачано {fn}")
         threading.Thread(target=t, daemon=True).start()
 
-    def rebuild_index_only(self):
+    # -------------------------------------------------------------------------
+    # V2.1: сборка единого зашифрованного manifest.json в /cloud
+    # V2.1: building the unified encrypted manifest.json in /cloud
+    # -------------------------------------------------------------------------
+    # Приватный ключ подписи никогда не покидает эту машину, поэтому схема такая:
+    #   1. На сервере пересобирается ОТКРЫТЫЙ индекс (mods/* + сохранённые archives)
+    #      во временный файл ВНЕ веб-корня (/root/...).
+    #   2. Панель скачивает его, локально добавляет метаданные (java, версии),
+    #      шифрует (AES-256-GCM) и подписывает (Ed25519).
+    #   3. Готовый конверт загружается в /cloud/manifest.json.
+    # The private signing key never leaves this machine, hence:
+    #   1. The server rebuilds a PLAINTEXT index (mods/* + preserved archives) into
+    #      a temp file OUTSIDE the web root (/root/...).
+    #   2. The panel downloads it, locally adds metadata, encrypts and signs.
+    #   3. The finished envelope is uploaded to /cloud/manifest.json.
+
+    REMOTE_SRC_INDEX = "/root/notebuns_manifest_src/index.json"
+
+    def _resolve_key_paths(self):
+        """Пути к файлам ключей: из настроек панели или из logs-agent/keys рядом с репо."""
+        keys_cfg = self.ctx.config_manager.get("manifest_keys")
+        sym = (keys_cfg.get("sym_key_file") or "").strip()
+        priv = (keys_cfg.get("ed25519_private_file") or "").strip()
+        if not sym or not priv:
+            base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs-agent", "keys")
+            sym = sym or os.path.join(base, "manifest_sym.key")
+            priv = priv or os.path.join(base, "ed25519_private.key")
+        return sym, priv
+
+    def rebuild_cloud_manifest(self):
         def _confirmed(e):
             dlg.open = False
             self.ctx.page.update()
-            self.ctx.logger.log("Запущена пересборка client/index.json...")
+            self.ctx.logger.log("Запущена сборка зашифрованного /cloud/manifest.json...")
 
             prog_dlg = ft.AlertDialog(
-                title=ft.Text("Сборка Index"),
+                title=ft.Text("Сборка Manifest"),
                 content=ft.Row([
                     ft.ProgressRing(),
-                    ft.Text(" Сканирование client/mods и вычисление BLAKE3...", expand=True)
+                    ft.Text(" Сканирование cloud/mods, шифрование и подпись...", expand=True)
                 ]),
                 modal=True
             )
@@ -621,42 +663,93 @@ class SyncTab(ft.Container):
             prog_dlg.open = True
             self.ctx.page.update()
 
+            def close_progress():
+                schedule_ui(self.ctx.page, lambda: setattr(prog_dlg, "open", False) or self.ctx.page.update())
+
             def t():
+                sym_file, priv_file = self._resolve_key_paths()
+                if not (os.path.isfile(sym_file) and os.path.isfile(priv_file)):
+                    close_progress()
+                    self.ctx.logger.log(
+                        f"Ключи не найдены (sym={sym_file}, priv={priv_file}). "
+                        "Укажите пути в Настройках -> Ключи manifest.", True)
+                    return
+
                 dc = self.ctx.config_manager.get("client_server")
-                db = dc["remote_dir"]
+                db = dc["remote_dir"].rstrip("/")
                 mods_dir = self.ctx.sync_manager.get_remote_mods_dir("client_server")
-                index_path = f"{db}/client/index.json"
                 ssh = SSHManager(dc["host"], dc["user"], dc["password"])
                 ok, msg = ssh.connect()
                 if not ok:
-                    schedule_ui(self.ctx.page, lambda: setattr(prog_dlg, "open", False) or self.ctx.page.update())
+                    close_progress()
                     self.ctx.logger.log(f"Ошибка SSH: {msg}", True)
                     return
-                script = remote_rebuild_script(index_path, mods_dir)
-                b = base64.b64encode(script.encode()).decode()
-                _, out = ssh.execute_command(
-                    f'python3 -c "import base64,sys;exec(base64.b64decode(sys.argv[1]).decode(\'utf-8\'))" {b}',
-                    timeout=300,
-                )
-                ssh.disconnect()
-                result = (out or "").strip().splitlines()[-1] if out else ""
-                if result.startswith("OK"):
-                    self.ctx.logger.log(f"index.json пересобран: {result}")
-                else:
-                    self.ctx.logger.log(f"Ошибка сборки index: {out or 'пустой ответ'}", True)
-                schedule_ui(self.ctx.page, lambda: setattr(prog_dlg, "open", False) or self.ctx.page.update())
+                try:
+                    # Шаг 1: источник index вне веб-корня. Seed — архив july (client перенесён).
+                    # Step 1: index source outside the web root. Seed from july archive (client moved).
+                    seed = "/root/download.inflexus/old/july/client/index.json"
+                    ssh.execute_command(
+                        f"mkdir -p $(dirname {self.REMOTE_SRC_INDEX}); "
+                        f"[ -f {self.REMOTE_SRC_INDEX} ] || "
+                        f"{{ [ -f {seed} ] && cp {seed} {self.REMOTE_SRC_INDEX}; }} || "
+                        f"{{ [ -f {db}/cloud/manifest.json ] && echo '{{\"archives\":{{}},\"files\":{{}}}}' > {self.REMOTE_SRC_INDEX}; }}",
+                        timeout=30,
+                    )
+                    # Шаг 2: пересборка mods/* на сервере (blake3 по содержимому cloud/mods).
+                    # Step 2: rebuild mods/* on the server (blake3 over cloud/mods contents).
+                    script = remote_rebuild_script(self.REMOTE_SRC_INDEX, mods_dir, CLOUD_BASE_URL)
+                    b = base64.b64encode(script.encode()).decode()
+                    _, out = ssh.execute_command(
+                        f'python3 -c "import base64,sys;exec(base64.b64decode(sys.argv[1]).decode(\'utf-8\'))" {b}',
+                        timeout=300,
+                    )
+                    result = (out or "").strip().splitlines()[-1] if out else ""
+                    if not result.startswith("OK"):
+                        self.ctx.logger.log(f"Ошибка сборки индекса: {out or 'пустой ответ'}", True)
+                        return
+
+                    # Шаг 3: скачать открытый индекс, локально зашифровать и подписать.
+                    # Step 3: download the plaintext index, locally encrypt and sign.
+                    import tempfile
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        local_index = os.path.join(tmpdir, "index.json")
+                        local_env = os.path.join(tmpdir, "manifest.json")
+                        ssh.sftp.get(self.REMOTE_SRC_INDEX, local_index)
+
+                        metadata_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloud_manifest_metadata.json")
+                        manifest = build_from_existing_index(local_index, metadata_path)
+                        sym = open(sym_file, "r", encoding="utf-8").read().strip()
+                        priv = open(priv_file, "r", encoding="utf-8").read().strip()
+                        seal_and_write(manifest, local_env, sym, priv)
+
+                        # Шаг 4: загрузка конверта в /cloud/manifest.json.
+                        # Step 4: upload the envelope to /cloud/manifest.json.
+                        ssh.sftp.put(local_env, f"{db}/cloud/manifest.json")
+                        ssh.execute_command(f"chown www-data:www-data {db}/cloud/manifest.json", timeout=15)
+
+                    n_mods = len([k for k in manifest.get("files", {}) if str(k).startswith("mods/")])
+                    self.ctx.logger.log(
+                        f"/cloud/manifest.json собран и загружен (модов: {n_mods}, "
+                        f"архивов: {len(manifest.get('archives', {}))}, зашифрован+подписан)."
+                    )
+                except Exception as err:
+                    self.ctx.logger.log(f"Ошибка сборки manifest: {err}", True)
+                finally:
+                    ssh.disconnect()
+                    close_progress()
 
             threading.Thread(target=t, daemon=True).start()
 
         dlg = ft.AlertDialog(
-            title=ft.Text("Index"),
+            title=ft.Text("Manifest V2.1"),
             content=ft.Column(
                 [
-                    ft.Text("Пересобрать client/index.json на сервере скачивания?"),
+                    ft.Text("Пересобрать зашифрованный /cloud/manifest.json?"),
                     ft.Text(
-                        "ВНИМАНИЕ! Список модов в index.json будет полностью пересобран "
-                        "по содержимому client/mods. Лишние jar на сервере попадут в лаунчер, "
-                        "отсутствующие — исчезнут из списка. Проверьте папку модов перед подтверждением!",
+                        "ВНИМАНИЕ! Список модов будет полностью пересобран по содержимому "
+                        "cloud/mods на сервере. Лишние jar попадут в лаунчер, отсутствующие — "
+                        "исчезнут из списка. Файл будет зашифрован и подписан локальными ключами. "
+                        "Проверьте папку модов перед подтверждением!",
                         color=C["red"],
                         weight=ft.FontWeight.BOLD,
                         size=14,
@@ -673,6 +766,65 @@ class SyncTab(ft.Container):
         self.ctx.page.overlay.append(dlg)
         dlg.open = True
         self.ctx.page.update()
+
+    # -------------------------------------------------------------------------
+    # V2.1: автопроверка зеркала GitHub -> fallback (контент + exe)
+    # -------------------------------------------------------------------------
+
+    def _set_mirror_status(self, text, color=None):
+        def apply():
+            self.mirror_status.value = text
+            if color:
+                self.mirror_status.color = color
+        schedule_ui(self.ctx.page, apply)
+
+    def check_exe_mirror(self):
+        """Полная проверка зеркала (контент + exe) при старте панели."""
+        def t():
+            dc = self.ctx.config_manager.get("client_server")
+            if not dc.get("host"):
+                self._set_mirror_status("Зеркало GH→сервер: сервер не настроен", C["text_dim"])
+                return
+            ssh = SSHManager(dc["host"], dc["user"], dc["password"])
+            ok, msg = ssh.connect()
+            if not ok:
+                self._set_mirror_status("Зеркало GH→сервер: нет SSH", C["red"])
+                return
+            try:
+                status = check_all(ssh, dc["remote_dir"])
+                color = C["accent"] if status.ok else C["orange"]
+                self._set_mirror_status(f"GH→сервер: {status.message}", color)
+                if not status.ok:
+                    self.ctx.logger.log(f"Зеркало GitHub: {status.message} — нажмите «Синхр. GH→сервер».")
+            finally:
+                ssh.disconnect()
+        threading.Thread(target=t, daemon=True).start()
+
+    def sync_exe_mirror(self):
+        """Совместимость: полная синхронизация GitHub -> сервер."""
+        self.sync_github_fallback()
+
+    def sync_github_fallback(self):
+        """Проверить и дозалить все файлы лаунчера с GitHub на fallback-сервер."""
+        def t():
+            dc = self.ctx.config_manager.get("client_server")
+            if not dc.get("host"):
+                self.ctx.logger.log("Клиент-сервер не настроен", True)
+                return
+            self._set_mirror_status("GH→сервер: синхронизация...", C["orange"])
+            ssh = SSHManager(dc["host"], dc["user"], dc["password"])
+            ok, msg = ssh.connect()
+            if not ok:
+                self._set_mirror_status("Зеркало GH→сервер: нет SSH", C["red"])
+                self.ctx.logger.log(f"Ошибка SSH: {msg}", True)
+                return
+            try:
+                status = sync_all(ssh, dc["remote_dir"], progress_cb=self.ctx.logger.log)
+                color = C["accent"] if status.ok else C["red"]
+                self._set_mirror_status(f"GH→сервер: {status.message}", color)
+            finally:
+                ssh.disconnect()
+        threading.Thread(target=t, daemon=True).start()
 
 class ConsoleTab(ft.Container):
     def __init__(self, ctx):
@@ -1165,6 +1317,12 @@ class SettingsTab(ft.Container):
         self._scard("Клиент-сервер", "client_server", [("name","Название",False),("host","Хост",False),("user","Логин",False),("password","Пароль",True),("remote_dir","Путь к сайту",False)])
         self._scard("Игровой сервер", "game_server", [("name","Название",False),("host","Хост",False),("user","Логин",False),("password","Пароль",True),("remote_dir","Путь к серверу",False), ("screen_name", "Имя Screen", False)])
         self._scard("Настройки бекапа", "backups", [("excluded_folders", "Исключения (через запятую)", False), ("7z_args", "Аргументы 7z", False)])
+        # V2.1: пути к файлам ключей шифрования/подписи manifest (сами ключи в git не попадают).
+        # V2.1: paths to the manifest encryption/signing key files (the keys never enter git).
+        self._scard("Ключи manifest (V2.1)", "manifest_keys", [
+            ("sym_key_file", "Файл sym-ключа (AES)", False),
+            ("ed25519_private_file", "Файл приватного Ed25519", False),
+        ])
         
         self.dir_picker = ft.FilePicker()
         self.config_picker = ft.FilePicker()
@@ -1397,6 +1555,9 @@ class AdminPanelFlet:
         if cm.import_required:
             self._show_config_import_dialog()
         self.sync_tab.scan_mods()
+        # V2.1: автопроверка при старте — залит ли релизный exe с GitHub на fallback-сервер.
+        # V2.1: startup auto-check — is the GitHub release exe mirrored to the fallback server.
+        self.sync_tab.check_exe_mirror()
         threading.Thread(target=self.backups_tab.refresh_backups, daemon=True).start()
         threading.Thread(target=self.console_tab._check_server_status, daemon=True).start()
         threading.Thread(target=self.console_tab._start_live_stream, daemon=True).start()

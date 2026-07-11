@@ -1,0 +1,26 @@
+{
+  "java_version": "21",
+  "java_windows": {
+    "urls": [
+      "https://download.inflexus.world/cloud/java/OpenJDK21U-jdk_x64_windows_hotspot_21.0.9_10.zip"
+    ],
+    "hash": "b3:e0f174c74117391177abfe3e3d1cc13e1cba8482caed6ca2d5ce3434f60e8c94",
+    "sha256": "1c67df516e9795c0b09f5714bfe151da2e3cc988082042f5bbb60d75e4e63fb5"
+  },
+  "java_linux": {
+    "urls": [
+      "https://download.inflexus.world/cloud/java/OpenJDK21U-jdk_x64_linux_hotspot_21.0.9_10.tar.gz"
+    ],
+    "hash": "b3:91e8464c08cbfb6631bb32eb92f74e24681ab4b660b144a28fa14767b59e338e",
+    "sha256": "810d3773df7e0d6c4394e4e244b264c8b30e0b05a0acf542d065fd78a6b65c2f"
+  },
+  "minecraft_version": "1.21.1",
+  "launcher_version": "2.1.0",
+  "fallbacks": {
+    "java_windows": "https://download.inflexus.world/cloud/java/OpenJDK21U-jdk_x64_windows_hotspot_21.0.9_10.zip",
+    "java_linux": "https://download.inflexus.world/cloud/java/OpenJDK21U-jdk_x64_linux_hotspot_21.0.9_10.tar.gz",
+    "java_macos": null,
+    "libraries_base_url": null,
+    "assets_base_url": null
+  }
+}

@@ -12,7 +12,9 @@ DEFAULT_CONFIG = {
         "user": "root",
         "password": "",
         "remote_dir": "/var/www/download.inflexus.world",
-        "mods_subpath": "client/mods",
+        # V2.1: файлы нового лаунчера живут в /cloud (mods, java, archives, manifest.json)
+        # V2.1: the new launcher's files live in /cloud (mods, java, archives, manifest.json)
+        "mods_subpath": "cloud/mods",
     },
     "game_server": {
         "name": "Игровой сервер",
@@ -25,6 +27,12 @@ DEFAULT_CONFIG = {
     },
     "paths": {
         "local_mods_dir": "mods",
+    },
+    # V2.1: ключи шифрования/подписи manifest (пути к файлам base64-ключей, НЕ сами ключи).
+    # V2.1: manifest encryption/signing keys (paths to base64 key files, NOT the keys themselves).
+    "manifest_keys": {
+        "sym_key_file": "",
+        "ed25519_private_file": "",
     },
     "backups": {
         "excluded_folders": "bluemap, dynmap, coreprotect, logs, crash-reports, cache, backups",

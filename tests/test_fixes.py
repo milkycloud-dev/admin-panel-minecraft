@@ -23,22 +23,34 @@ def test_download_file_exists():
     assert hasattr(SSHManager("h", "u", "p"), "download_file")
 
 
+class _StubConfig:
+    """Мини-конфиг без чтения admin_settings.json (герметичный тест)."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def get(self, section, key=None):
+        if key is None:
+            return self._data.get(section, {})
+        return self._data.get(section, {}).get(key, "")
+
+
 def test_client_mods_dir():
-    from config_manager import ConfigManager
     from sync_manager import SyncManager
-    cm = ConfigManager()
-    sm = SyncManager(cm)
+    # V2.1: у клиент-сервера моды лежат в cloud/mods
+    sm = SyncManager(_StubConfig({"client_server": {"remote_dir": "/var/www/x", "mods_subpath": ""}}))
     path = sm.get_remote_mods_dir("client_server")
-    assert path.endswith("client/mods"), path
+    assert path.endswith("cloud/mods"), path
+
+    from config_manager import DEFAULT_CONFIG
+    assert DEFAULT_CONFIG["client_server"]["mods_subpath"] == "cloud/mods"
 
 
 def test_game_mods_dir():
-    from config_manager import ConfigManager
     from sync_manager import SyncManager
-    cm = ConfigManager()
-    sm = SyncManager(cm)
+    sm = SyncManager(_StubConfig({"game_server": {"remote_dir": "/root/mc", "mods_subpath": ""}}))
     path = sm.get_remote_mods_dir("game_server")
-    assert path.endswith("/mods") and "client" not in path.split("/")[-2:], path
+    assert path.endswith("/mods") and "cloud" not in path, path
 
 
 def test_updater_version():
