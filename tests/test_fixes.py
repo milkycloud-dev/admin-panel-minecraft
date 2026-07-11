@@ -55,7 +55,7 @@ def test_game_mods_dir():
 
 def test_updater_version():
     from updater import CURRENT_VERSION, _schedule_ui
-    assert CURRENT_VERSION == "2.0.0"
+    assert CURRENT_VERSION == "2.1.0"
     assert callable(_schedule_ui)
 
 
