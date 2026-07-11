@@ -14,7 +14,7 @@ def test_get_remote_mods_retries_three_times_then_returns_error():
         def get(self, section, key=None):
             data = {
                 "client_server": {
-                    "host": "1.2.3.4",
+                    "host": "127.0.0.1",
                     "user": "root",
                     "password": "x",
                     "remote_dir": "/var/www",
@@ -59,7 +59,7 @@ def test_get_remote_mods_succeeds_on_second_attempt():
         def get(self, section, key=None):
             data = {
                 "client_server": {
-                    "host": "1.2.3.4",
+                    "host": "127.0.0.1",
                     "user": "root",
                     "password": "x",
                     "remote_dir": "/var/www",
