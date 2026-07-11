@@ -408,45 +408,66 @@ class SyncTab(ft.Container):
         schedule_ui(page, lambda: self.mods_lv.controls.clear())
 
         def worker():
-            self.ctx.logger.log("[Система] Сканирование модов на серверах...")
+            self.ctx.logger.log("[Система] Сканирование модов на серверах (до 3 попыток на хост)...")
 
-            cm, c_err = None, None
-            for attempt in range(3):
-                cm, c_err = self.ctx.sync_manager.get_remote_mods("client_server")
-                if c_err and "Authentication failed" in c_err:
-                    self.ctx.logger.log("Неверный логин или пароль для Клиент-сервера.", True)
-                    break
-                if c_err:
-                    if attempt < 2:
-                        self.ctx.logger.log(f"Ошибка Клиент: {c_err.strip()}. Переподключение через 3с...", True)
-                        time.sleep(3)
-                    else:
-                        self.ctx.logger.log(f"Ошибка Клиент: {c_err.strip()}. Пропуск.", True)
-                    break
-                break
+            def make_retry_logger(title):
+                def _on(attempt, max_attempts, err):
+                    if attempt < max_attempts and "Authentication failed" not in err:
+                        self.ctx.logger.log(
+                            f"[Система] {title}: попытка {attempt}/{max_attempts} не удалась — "
+                            f"{err.strip()}. Повтор через 2с...",
+                            True,
+                        )
+                return _on
 
-            gm, g_err = None, None
-            for attempt in range(3):
-                gm, g_err = self.ctx.sync_manager.get_remote_mods("game_server")
-                if g_err and "Authentication failed" in g_err:
-                    self.ctx.logger.log("Неверный логин или пароль для Игрового сервера.", True)
-                    break
-                if g_err:
-                    if attempt < 2:
-                        self.ctx.logger.log(f"Ошибка Игровой: {g_err.strip()}. Переподключение через 3с...", True)
-                        time.sleep(3)
-                    else:
-                        self.ctx.logger.log(f"Ошибка Игровой: {g_err.strip()}. Пропуск.", True)
-                    break
-                break
+            cm, c_err = self.ctx.sync_manager.get_remote_mods(
+                "client_server",
+                max_attempts=3,
+                on_attempt=make_retry_logger("Клиент-сервер"),
+            )
+            if c_err:
+                if "Authentication failed" in c_err or "auth failed" in c_err.lower():
+                    self.ctx.logger.log(
+                        f"[Система] Клиент-сервер: неверный логин/пароль. Детали: {c_err.strip()}",
+                        True,
+                    )
+                else:
+                    self.ctx.logger.log(
+                        f"[Система] Клиент-сервер: не удалось загрузить моды. {c_err.strip()}",
+                        True,
+                    )
+                cm = {}
 
-            cm = cm or {}
-            gm = gm or {}
+            gm, g_err = self.ctx.sync_manager.get_remote_mods(
+                "game_server",
+                max_attempts=3,
+                on_attempt=make_retry_logger("Игровой сервер"),
+            )
+            if g_err:
+                if "Authentication failed" in g_err or "auth failed" in g_err.lower():
+                    self.ctx.logger.log(
+                        f"[Система] Игровой сервер: неверный логин/пароль. Детали: {g_err.strip()}",
+                        True,
+                    )
+                else:
+                    self.ctx.logger.log(
+                        f"[Система] Игровой сервер: не удалось загрузить моды. {g_err.strip()}",
+                        True,
+                    )
+                gm = {}
+
             self.client_mods_cache = cm
             self.game_mods_cache = gm
             schedule_ui(page, lambda: self._render_mod_scan(cm, gm))
-            self.ctx.logger.log(f"Клиент-сервер: {len(cm)} модов, Игровой: {len(gm)} модов.")
-            self.ctx.logger.log("[Система] Списки модов обновлены и сверены.")
+            if c_err or g_err:
+                self.ctx.logger.log(
+                    f"[Система] Скан завершён с ошибками. Клиент: {len(cm)} модов"
+                    f"{' (СБОЙ)' if c_err else ''}, Игровой: {len(gm)} модов"
+                    f"{' (СБОЙ)' if g_err else ''}."
+                )
+            else:
+                self.ctx.logger.log(f"Клиент-сервер: {len(cm)} модов, Игровой: {len(gm)} модов.")
+                self.ctx.logger.log("[Система] Списки модов обновлены и сверены.")
 
         page.run_thread(worker)
 

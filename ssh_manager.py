@@ -6,10 +6,11 @@ class SSHManager:
     [RU] Менеджер SSH-подключений. Обеспечивает выполнение команд и SFTP-передачу файлов.
     [EN] SSH Connection Manager. Handles command execution and SFTP file transfers.
     """
-    def __init__(self, host, user, password, timeout=5):
+    def __init__(self, host, user, password, timeout=20):
         """
         [RU] Конструктор класса. Инициализирует параметры подключения.
-        [EN] Class constructor. Initializes connection parameters.
+        timeout — секунды на TCP/баннер (раньше 5с давало ложные обрывы на нестабильном канале).
+        [EN] Constructor. timeout is TCP/banner seconds (was 5s — flaky on unstable links).
         """
         self.host = host
         self.user = user
@@ -36,9 +37,14 @@ class SSHManager:
                 username=self.user, 
                 password=self.password, 
                 timeout=self.timeout,
+                banner_timeout=self.timeout,
+                auth_timeout=self.timeout,
                 look_for_keys=False,
                 allow_agent=False
             )
+            transport = self.ssh.get_transport()
+            if transport is not None:
+                transport.set_keepalive(30)
             self.sftp = self.ssh.open_sftp()
             return True, "Connected successfully"
         except Exception as e:

@@ -1,4 +1,5 @@
 import os
+import time
 from ssh_manager import SSHManager
 
 class SyncManager:
@@ -56,28 +57,27 @@ class SyncManager:
                     mods[rel_path] = {"size": size, "abs_path": abs_path}
         return mods, full_mods_dir
 
-    def get_remote_mods(self, host_key):
+    def _scan_remote_mods_once(self, host_key):
         """
-        [RU] Подключается к удаленному серверу по SSH и сканирует папку модов.
-        Использует Python-скрипт, передаваемый через base64, для быстрого сканирования.
-        Возвращает кортеж (словарь_модов, сообщение_об_ошибке_если_есть).
-        
-        [EN] Connects to a remote server via SSH and scans the mods directory.
-        Uses a base64-encoded Python script for fast scanning.
-        Returns a tuple (mods_dictionary, error_message_if_any).
+        Одна попытка: SSH connect + удалённый python-скан папки модов.
+        Возвращает (mods_dict | None, error_str).
+        None в mods = жёсткий сбой (сеть/SSH/команда); {} = папка пустая.
         """
         conf = self.config.get(host_key)
         if not conf.get("host"):
             return {}, ""
-        ssh = SSHManager(conf["host"], conf["user"], conf["password"])
+
+        host = conf["host"]
+        label = conf.get("name") or host_key
+        remote_mods_dir = self.get_remote_mods_dir(host_key)
+        ssh = SSHManager(host, conf["user"], conf["password"])
         ok, msg = ssh.connect()
         if not ok:
-            return None, msg
+            return None, (
+                f"{label} ({host}): не удалось подключиться по SSH — {msg}"
+            )
 
-        remote_mods_dir = self.get_remote_mods_dir(host_key)
-        
         import base64
-        # [RU] Скрипт, который будет выполнен на сервере / [EN] Script to be executed on the server
         script = f"""import os, hashlib
 d = '{remote_mods_dir}'
 if not os.path.exists(d):
@@ -97,20 +97,31 @@ if os.path.exists(d):
                 except Exception:
                     pass
 """
-        # [RU] Кодируем скрипт в base64 для безопасной передачи / [EN] Encode script to base64 for safe transfer
-        b64 = base64.b64encode(script.encode('utf-8')).decode('utf-8')
+        b64 = base64.b64encode(script.encode("utf-8")).decode("utf-8")
         py_cmd = (
             f"python3 -c \"import base64,sys;exec(base64.b64decode(sys.argv[1]).decode('utf-8'))\" {b64}"
             f" || python -c \"import base64,sys;exec(base64.b64decode(sys.argv[1]).decode('utf-8'))\" {b64}"
         )
-        
-        ok, out = ssh.execute_command(py_cmd, timeout=120)
-        
+
+        try:
+            ok, out = ssh.execute_command(py_cmd, timeout=180)
+        except Exception as exc:
+            ssh.disconnect()
+            return None, (
+                f"{label} ({host}): сбой команды сканирования {remote_mods_dir} — {exc}"
+            )
+
+        if not ok and (not out or not out.strip()):
+            ssh.disconnect()
+            return None, (
+                f"{label} ({host}): команда сканирования {remote_mods_dir} вернула ошибку "
+                f"без вывода — {out or 'пустой stderr/stdout'}"
+            )
+
         mods = {}
         if out and out.strip():
-            # [RU] Парсим вывод скрипта / [EN] Parse script output
-            for line in out.strip().split('\n'):
-                parts = line.strip().split('|')
+            for line in out.strip().split("\n"):
+                parts = line.strip().split("|")
                 if len(parts) >= 2:
                     rel_path = parts[0]
                     try:
@@ -121,4 +132,37 @@ if os.path.exists(d):
                         pass
 
         ssh.disconnect()
-        return mods, out if not ok else ""
+        # Если команда упала, но строки jar всё же распарсились — считаем успехом.
+        if not ok and not mods:
+            return None, (
+                f"{label} ({host}): не удалось прочитать моды в {remote_mods_dir} — "
+                f"{(out or '').strip()[:300]}"
+            )
+        return mods, ""
+
+    def get_remote_mods(self, host_key, max_attempts=3, retry_delay_sec=2, on_attempt=None):
+        """
+        Скан удалённых модов с повторами (по умолчанию до 3 попыток).
+        on_attempt(attempt, max_attempts, err) — колбэк для лога промежуточных сбоев.
+        При полном провале возвращает (None, подробная_ошибка).
+        """
+        conf = self.config.get(host_key)
+        if not conf.get("host"):
+            return {}, ""
+
+        last_err = ""
+        for attempt in range(1, max_attempts + 1):
+            mods, err = self._scan_remote_mods_once(host_key)
+            if not err:
+                return mods if mods is not None else {}, ""
+            last_err = err
+            if on_attempt:
+                on_attempt(attempt, max_attempts, err)
+            if "Authentication failed" in err or "auth failed" in err.lower():
+                return None, f"{err} (попытка {attempt}/{max_attempts}, повтор бессмысленен)"
+            if attempt < max_attempts:
+                time.sleep(retry_delay_sec)
+
+        return None, (
+            f"{last_err} | сканирование модов провалилось после {max_attempts} попыток"
+        )
