@@ -6,6 +6,7 @@ __pycache__/
 !cloud_manifest_metadata.json
 !package.json
 run_personal.cmd
+run_personal.sh
 admin_settings.json
 keys/
 *.key

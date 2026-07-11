@@ -1,14 +1,17 @@
 """
-Сборка персонального run_personal.cmd для тиммейта (НЕ коммитить!).
+Сборка персональных раннеров для тиммейта (НЕ коммитить!):
+  - run_personal.cmd  (Windows)
+  - run_personal.sh   (Linux)
 
 Вшивает:
   - admin_settings.json (SSH/хосты/пути);
-  - manifest_sym.key + ed25519_private.key (и public для полноты);
-  - при каждом запуске: git fetch/reset к origin/main (актуальный код с GitHub).
+  - manifest_sym.key + ed25519_private.key (+ public);
+  - при каждом запуске: git fetch/reset к origin/main.
 
 Usage:
   python tools/build_personal_runner.py
-  python tools/build_personal_runner.py path/to/admin_settings.json out.cmd path/to/keys_dir
+  python tools/build_personal_runner.py path/to/admin_settings.json [out_stem] [keys_dir]
+  # out_stem without extension → writes out_stem.cmd and out_stem.sh
 """
 from __future__ import annotations
 
@@ -20,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_KEYS = ROOT.parent / "logs-agent" / "keys"
 
-TEMPLATE = r'''@echo off
+TEMPLATE_WIN = r'''@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
 rem =============================================================================
@@ -190,6 +193,138 @@ pause
 exit /b 1
 '''
 
+TEMPLATE_SH = r'''#!/usr/bin/env bash
+# =============================================================================
+# PERSONAL TEAM RUNNER (Linux) — contains secrets. Do NOT commit or publish.
+# Персональный раннер: настройки + ключи V2.1. НЕ коммитить / не публиковать.
+# =============================================================================
+set -euo pipefail
+
+REPO_URL="https://github.com/milkycloud-dev/admin-panel-minecraft.git"
+APP_DIR="${MC_ADMIN_APP_DIR:-$HOME/Desktop/admin-panel-minecraft}"
+SETTINGS_B64="__SETTINGS_B64__"
+SYM_KEY_B64="__SYM_KEY_B64__"
+PRIV_KEY_B64="__PRIV_KEY_B64__"
+PUB_KEY_B64="__PUB_KEY_B64__"
+
+echo
+echo "============================================"
+echo "  Admin Panel V2.1 — Personal Team Run (Linux)"
+echo "============================================"
+echo
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "ERROR: '$1' not found. Install it and retry."
+    exit 1
+  }
+}
+
+need_cmd git
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_CMD=python3
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_CMD=python
+else
+  echo "ERROR: python3/python not found. Install Python 3.11+ and retry."
+  exit 1
+fi
+
+echo "[OK] Git:    $(command -v git)"
+echo "[OK] Python: $(command -v "$PYTHON_CMD")"
+echo "[OK] App dir: $APP_DIR"
+echo
+
+prepare_source() {
+  echo "[SETUP] Ensuring latest code from GitHub (origin/main)..."
+  if [[ -d "$APP_DIR/.git" ]]; then
+    git -C "$APP_DIR" remote set-url origin "$REPO_URL" >/dev/null 2>&1 || true
+    if ! git -C "$APP_DIR" fetch --prune origin main; then
+      echo "[WARN] fetch failed, trying fresh clone..."
+      rm -rf "$APP_DIR"
+    else
+      LOCAL_SHA=$(git -C "$APP_DIR" rev-parse HEAD)
+      REMOTE_SHA=$(git -C "$APP_DIR" rev-parse origin/main)
+      echo "[INFO] local=$LOCAL_SHA"
+      echo "[INFO] remote=$REMOTE_SHA"
+      if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
+        echo "[SETUP] Updating to origin/main..."
+        git -C "$APP_DIR" reset --hard origin/main
+        git -C "$APP_DIR" clean -fd
+      else
+        echo "[OK] Already up to date with GitHub main"
+      fi
+      return 0
+    fi
+  fi
+
+  if [[ -e "$APP_DIR" ]]; then
+    rm -rf "$APP_DIR"
+  fi
+  git clone --branch main --depth 1 "$REPO_URL" "$APP_DIR"
+  echo "[OK] Fresh clone from GitHub"
+}
+
+write_embedded_secrets() {
+  echo "[SETUP] Writing embedded settings + V2.1 keys..."
+  mkdir -p "$APP_DIR/keys"
+  APP_DIR="$APP_DIR" SETTINGS_B64="$SETTINGS_B64" \
+  SYM_KEY_B64="$SYM_KEY_B64" PRIV_KEY_B64="$PRIV_KEY_B64" PUB_KEY_B64="$PUB_KEY_B64" \
+  "$PYTHON_CMD" - <<'PY'
+import base64, json, os
+app = os.environ["APP_DIR"]
+keys = os.path.join(app, "keys")
+os.makedirs(keys, exist_ok=True)
+
+def write_key(env_name, filename):
+    raw = base64.b64decode(os.environ[env_name]).decode("utf-8").strip() + "\n"
+    path = os.path.join(keys, filename)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(raw)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+write_key("SYM_KEY_B64", "manifest_sym.key")
+write_key("PRIV_KEY_B64", "ed25519_private.key")
+write_key("PUB_KEY_B64", "ed25519_public.key")
+
+data = json.loads(base64.b64decode(os.environ["SETTINGS_B64"]).decode("utf-8"))
+data.setdefault("manifest_keys", {})
+data["manifest_keys"]["sym_key_file"] = os.path.join(keys, "manifest_sym.key")
+data["manifest_keys"]["ed25519_private_file"] = os.path.join(keys, "ed25519_private.key")
+if "client_server" in data:
+    data["client_server"]["mods_subpath"] = "cloud/mods"
+path = os.path.join(app, "admin_settings.json")
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=4, ensure_ascii=False)
+    f.write("\n")
+print("[OK] Settings and keys deployed to", app)
+PY
+}
+
+install_python_packages() {
+  echo "[SETUP] Installing Python packages..."
+  "$PYTHON_CMD" -m pip install --upgrade pip -q
+  "$PYTHON_CMD" -m pip install -r "$APP_DIR/requirements.txt" -q
+}
+
+prepare_source
+write_embedded_secrets
+install_python_packages
+
+if [[ "${1:-}" == "--test" ]]; then
+  echo "[TEST] Personal runner setup complete."
+  exit 0
+fi
+
+echo
+echo "[RUN] Starting Minecraft Admin Panel..."
+cd "$APP_DIR"
+exec "$PYTHON_CMD" main.py
+'''
+
 
 def _b64_file(path: Path) -> str:
     raw = path.read_text(encoding="utf-8").strip().encode("utf-8")
@@ -202,9 +337,8 @@ def _b64_json(data: dict) -> str:
     ).decode("ascii")
 
 
-def build(settings_path: Path, out_path: Path, keys_dir: Path) -> None:
+def _prepare_payload(settings_path: Path, keys_dir: Path) -> dict[str, str]:
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    # Ensure V2.1 defaults in embedded settings (paths filled at runtime).
     settings.setdefault("manifest_keys", {})
     settings["manifest_keys"]["sym_key_file"] = ""
     settings["manifest_keys"]["ed25519_private_file"] = ""
@@ -218,22 +352,59 @@ def build(settings_path: Path, out_path: Path, keys_dir: Path) -> None:
         if not p.is_file():
             raise FileNotFoundError(f"missing key file: {p}")
 
-    content = (
-        TEMPLATE.replace("__SETTINGS_B64__", _b64_json(settings))
-        .replace("__SYM_KEY_B64__", _b64_file(sym))
-        .replace("__PRIV_KEY_B64__", _b64_file(priv))
-        .replace("__PUB_KEY_B64__", _b64_file(pub))
-    )
+    return {
+        "__SETTINGS_B64__": _b64_json(settings),
+        "__SYM_KEY_B64__": _b64_file(sym),
+        "__PRIV_KEY_B64__": _b64_file(priv),
+        "__PUB_KEY_B64__": _b64_file(pub),
+    }
+
+
+def _fill(template: str, payload: dict[str, str]) -> str:
+    content = template
+    for key, value in payload.items():
+        content = content.replace(key, value)
+    return content
+
+
+def build(settings_path: Path, out_path: Path, keys_dir: Path) -> None:
+    """Build a single runner (.cmd or .sh) based on out_path suffix."""
+    payload = _prepare_payload(settings_path, keys_dir)
+    suffix = out_path.suffix.lower()
+    if suffix == ".sh":
+        content = _fill(TEMPLATE_SH, payload)
+        newline = "\n"
+    else:
+        content = _fill(TEMPLATE_WIN, payload)
+        newline = "\r\n"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(content, encoding="utf-8", newline="\r\n")
+    out_path.write_text(content, encoding="utf-8", newline=newline)
+    if suffix == ".sh":
+        try:
+            out_path.chmod(out_path.stat().st_mode | 0o755)
+        except OSError:
+            pass
     print(f"Wrote {out_path}")
     print(f"  settings: {settings_path}")
     print(f"  keys:     {keys_dir}")
     print("  WARNING: file contains passwords + private Ed25519 — do NOT commit/push.")
 
 
+def build_both(settings_path: Path, stem: Path, keys_dir: Path) -> tuple[Path, Path]:
+    """Write stem.cmd and stem.sh next to each other."""
+    win = stem.with_suffix(".cmd")
+    sh = stem.with_suffix(".sh")
+    build(settings_path, win, keys_dir)
+    build(settings_path, sh, keys_dir)
+    return win, sh
+
+
 if __name__ == "__main__":
     settings = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "admin_settings.json"
-    output = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "run_personal.cmd"
+    out_arg = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "run_personal"
     keys = Path(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_KEYS
-    build(settings, output, keys)
+
+    if out_arg.suffix.lower() in {".cmd", ".sh"}:
+        build(settings, out_arg, keys)
+    else:
+        build_both(settings, out_arg, keys)
